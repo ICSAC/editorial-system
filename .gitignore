@@ -1,0 +1,10 @@
+config.py
+downloads/
+__pycache__/
+*.pyc
+.env
+state/
+reviews/.bak-*/
+reviews/raw/
+reviews/*_citations.json
+reviews/*_citations.md

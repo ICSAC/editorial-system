@@ -1,0 +1,23 @@
+[Unit]
+Description=ICSAC Open Review Pipeline — community-request watcher
+Documentation=https://github.com/3RiversWebTech/zenodo-pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=orangepi
+Group=orangepi
+WorkingDirectory=/home/orangepi/Desktop/icsac/zenodo-pipeline
+EnvironmentFile=/home/orangepi/.config/zenodo-pipeline.env
+ExecStart=/usr/bin/python3 /home/orangepi/Desktop/icsac/zenodo-pipeline/pipeline.py watch-tick
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/orangepi/Desktop/icsac/zenodo-pipeline /home/orangepi/Desktop/icsac/icsacinstitute.org
+
+[Install]
+WantedBy=multi-user.target
