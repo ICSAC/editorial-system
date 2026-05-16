@@ -1,15 +1,15 @@
-"""Scrub internal reviews into publishable ICSAC-branded review artifacts.
+"""Redact internal reviews into publishable ICSAC-branded review artifacts.
 
 Operates on the authoritative internal review markdown in ``reviews/`` and
 emits a sanitized version that is safe to publish on icsacinstitute.org.
 
-The scrubber removes all vendor/model identifiers, renames reviewers
+The redaction removes all vendor/model identifiers, renames reviewers
 generically ("Reviewer 1", "Reviewer 2", ...), drops internal workflow
 detail (raw API error payloads, slot indices, fallback chains), and
 replaces the disagreement flag with a human-readable consensus label.
 
 A grep-gate (``assert_clean``) fails hard if any forbidden token survives
-scrubbing. Callers must catch the exception and abort publication.
+redacting. Callers must catch the exception and abort publication.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ FORBIDDEN_SECRET_PHRASES: tuple[str, ...] = (
 
 # Soft-warn tokens — bare "key", "api", "token", "google" that appear
 # regularly in academic prose ("key findings", "Google Scholar", "tokenizer").
-# Surfaced in the scrub report but do not abort. Operators can grep the
+# Surfaced in the redaction report but do not abort. Operators can grep the
 # published review manually if they want extra assurance.
 SOFT_WARN_TOKENS: tuple[str, ...] = (
     "google",
@@ -83,7 +83,7 @@ SOFT_WARN_TOKENS: tuple[str, ...] = (
 # Regex patterns indicating attempted exfiltration via review output.
 # Added 2026-04-18 after prompt-injection attack-surface audit. Triggered
 # by file paths pointing at our hosts, env-var assignments, and known
-# credential prefixes. Match anywhere in the scrubbed review text.
+# credential prefixes. Match anywhere in the redacted review text.
 FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
     # Absolute filesystem paths likely pointing at our hosts
     r"/home/orangepi\b",
@@ -109,7 +109,7 @@ FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
     # must reference rubrics by prose name, never by repo filename. Rewriting
     # pass runs first (_rewrite_rubric_filenames); this gate catches anything
     # that slipped through.
-    r"\b(?:rubrics/)?(?:scope|methodology|slop-detection|tone|calibration|review_quality_control)\.md\b",
+    r"\b(?:rubrics/)?(?:scope|methodology|ai-provenance|tone|calibration|review_quality_control)\.md\b",
 )
 
 
@@ -125,13 +125,13 @@ FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
 # silently leak.
 RUBRIC_FILENAME_PROSE: tuple[tuple[str, str], ...] = (
     ("rubrics/review_quality_control.md", "the audit rubric"),
-    ("rubrics/slop-detection.md", "the slop-detection rubric"),
+    ("rubrics/ai-provenance.md", "the AI provenance rubric"),
     ("rubrics/calibration.md", "the calibration rubric"),
     ("rubrics/methodology.md", "the methodology rubric"),
     ("rubrics/scope.md", "the scope rubric"),
     ("rubrics/tone.md", "the tone rubric"),
     ("review_quality_control.md", "the audit rubric"),
-    ("slop-detection.md", "the slop-detection rubric"),
+    ("ai-provenance.md", "the AI provenance rubric"),
     ("calibration.md", "the calibration rubric"),
     ("methodology.md", "the methodology rubric"),
     ("scope.md", "the scope rubric"),
@@ -413,8 +413,8 @@ class ScrubReport:
         return not self.fatal_hits
 
 
-class ScrubLeak(Exception):
-    """Raised when a scrubbed artifact still contains a fatal token."""
+class RedactionLeak(Exception):
+    """Raised when a redacted artifact still contains a fatal token."""
 
     def __init__(self, hits: list[tuple[str, int]], artifact_path: str | None):
         self.hits = hits
@@ -422,7 +422,7 @@ class ScrubLeak(Exception):
         preview = ", ".join(sorted({t for t, _ in hits}))
         loc = f" in {artifact_path}" if artifact_path else ""
         super().__init__(
-            f"Scrubbed review leaked forbidden tokens{loc}: {preview} "
+            f"Redacted review leaked forbidden tokens{loc}: {preview} "
             f"({len(hits)} total hit(s))"
         )
 
@@ -493,10 +493,10 @@ def scan(text: str) -> ScrubReport:
 
 
 def assert_clean(text: str, artifact_path: str | None = None) -> ScrubReport:
-    """Grep-gate: raise ScrubLeak on any fatal hit; return the scan report."""
+    """Grep-gate: raise RedactionLeak on any fatal hit; return the scan report."""
     report = scan(text)
     if report.fatal_hits:
-        raise ScrubLeak(report.fatal_hits, artifact_path)
+        raise RedactionLeak(report.fatal_hits, artifact_path)
     return report
 
 
@@ -511,7 +511,7 @@ def _strip_frontmatter(md: str) -> str:
 
 
 def render_public_html(public_md: str) -> str:
-    """Render scrubbed markdown into an HTML fragment for the landing page.
+    """Render redacted markdown into an HTML fragment for the landing page.
 
     Uses python-markdown with the 'tables' extension; falls back to a
     preformatted-text dump if markdown is not importable.
@@ -532,9 +532,9 @@ def publish_public_review(
     reviews_dir: str,
     website_repo: str,
 ) -> str:
-    """Scrub reviews/<id>_*.md and write md + html to website repo public-reviews/.
+    """Redact reviews/<id>_*.md and write md + html to website repo public-reviews/.
 
-    Returns the written .md path. Raises ScrubLeak if grep-gate trips on
+    Returns the written .md path. Raises RedactionLeak if grep-gate trips on
     either the markdown source or the rendered HTML.
     """
     # Exclude artifacts that are not the primary review markdown.
@@ -571,7 +571,7 @@ def publish_public_review(
     if report_md.warn_hits:
         uniq = sorted({t for t, _ in report_md.warn_hits})
         print(
-            f"  scrubber: {len(report_md.warn_hits)} soft-warn hit(s) "
+            f"  redaction: {len(report_md.warn_hits)} soft-warn hit(s) "
             f"({', '.join(uniq)}) — inspect {md_path} if unexpected."
         )
     return md_path
@@ -734,7 +734,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
 
     Contract: the returned string contains no reference to the
     injection_indicators dimension under any spelling. ``assert_rqc_clean``
-    enforces this before the scrubber writes anything to the site.
+    enforces this before the redaction writes anything to the site.
     """
     status_line = (
         "Review Quality Control: flagged — reviewed by human editors before acceptance."
@@ -876,7 +876,7 @@ def assert_rqc_clean(text: str, artifact_path: str | None = None) -> ScrubReport
 
     Runs the standard fatal/warn gate (vendors, secrets, exfil patterns)
     AND asserts that no reference to the redacted injection_indicators
-    dimension survives. A leak is treated as a ScrubLeak.
+    dimension survives. A leak is treated as a RedactionLeak.
     """
     report = scan(text)
     lowered = text.lower()
@@ -890,7 +890,7 @@ def assert_rqc_clean(text: str, artifact_path: str | None = None) -> ScrubReport
             extra_hits.append((f"[rqc-redacted] {tok}", at))
             start = at + 1
     if extra_hits or report.fatal_hits:
-        raise ScrubLeak(report.fatal_hits + extra_hits, artifact_path)
+        raise RedactionLeak(report.fatal_hits + extra_hits, artifact_path)
     return report
 
 
@@ -899,10 +899,10 @@ def publish_public_rqc(
     reviews_dir: str,
     website_repo: str,
 ) -> str | None:
-    """Scrub reviews/<id>_review_quality_control.md → public-reviews/<id>_review_quality_control.{md,html}.
+    """Redact reviews/<id>_review_quality_control.md → public-reviews/<id>_review_quality_control.{md,html}.
 
     Returns the written .md path, or None if no RQC file exists for the
-    record. Raises ScrubLeak if any forbidden token (including references
+    record. Raises RedactionLeak if any forbidden token (including references
     to the redacted injection_indicators dimension) survives.
     """
     src = os.path.join(reviews_dir, f"{record_id}_review_quality_control.md")
@@ -926,7 +926,7 @@ def publish_public_rqc(
     if report_md.warn_hits:
         uniq = sorted({t for t, _ in report_md.warn_hits})
         print(
-            f"  scrubber/rqc: {len(report_md.warn_hits)} soft-warn hit(s) "
+            f"  redaction/rqc: {len(report_md.warn_hits)} soft-warn hit(s) "
             f"({', '.join(uniq)}) — inspect {md_path} if unexpected."
         )
     return md_path
@@ -937,15 +937,15 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print(
-            "usage: python3 scrubber.py <record_id> [reviews_dir] [website_repo]\n"
-            "       python3 scrubber.py rqc <record_id> [reviews_dir] [website_repo]",
+            "usage: python3 redaction.py <record_id> [reviews_dir] [website_repo]\n"
+            "       python3 redaction.py rqc <record_id> [reviews_dir] [website_repo]",
             file=sys.stderr,
         )
         sys.exit(2)
 
     if sys.argv[1] == "rqc":
         if len(sys.argv) < 3:
-            print("usage: python3 scrubber.py rqc <record_id> ...", file=sys.stderr)
+            print("usage: python3 redaction.py rqc <record_id> ...", file=sys.stderr)
             sys.exit(2)
         record = sys.argv[2]
         rdir = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(__file__), "reviews")
@@ -956,7 +956,7 @@ if __name__ == "__main__":
         )
         try:
             written = publish_public_rqc(record, rdir, wrepo)
-        except ScrubLeak as e:
+        except RedactionLeak as e:
             print(f"SCRUB LEAK: {e}", file=sys.stderr)
             sys.exit(1)
         if written is None:
@@ -974,7 +974,7 @@ if __name__ == "__main__":
     )
     try:
         written = publish_public_review(record, rdir, wrepo)
-    except ScrubLeak as e:
+    except RedactionLeak as e:
         print(f"SCRUB LEAK: {e}", file=sys.stderr)
         sys.exit(1)
     print(f"wrote {written}")
@@ -982,7 +982,7 @@ if __name__ == "__main__":
     # Best-effort companion RQC publish.
     try:
         rqc_written = publish_public_rqc(record, rdir, wrepo)
-    except ScrubLeak as e:
+    except RedactionLeak as e:
         print(f"SCRUB LEAK (rqc): {e}", file=sys.stderr)
         sys.exit(1)
     if rqc_written:

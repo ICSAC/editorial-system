@@ -27,7 +27,7 @@ Or reference your inclusion in your own words:
 
 ## About the review
 
-Your submission was evaluated through ICSAC's open review process — a multi-reviewer panel scoring scope alignment, methodological transparency, internal consistency, citation integrity, and novelty — with human curator oversight. AI tooling helps the panel draft and structure each review; final acceptance decisions rest with human editors. A copy of your review report is available upon request.
+Your submission was evaluated through ICSAC's open review process — a multi-reviewer panel scoring domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal — with human curator oversight. AI tooling helps the panel draft and structure each review; final acceptance decisions rest with human editors. A copy of your review report is available upon request.
 
 ## Rights and licensing
 

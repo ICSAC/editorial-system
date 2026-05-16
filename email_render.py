@@ -140,10 +140,31 @@ def render_accept_email(review_data: dict, google_form_url: str = "") -> str:
     return _render(template, data)
 
 
-def render_reject_email(review_data: dict, review_summary: str = "",
-                        specific_concerns: str = "") -> str:
-    """Render the reject email."""
-    template = load_template("reject")
+def render_revise_and_resubmit_email(review_data: dict, review_summary: str = "",
+                                     specific_concerns: str = "") -> str:
+    """Render the revise-and-resubmit email — ICSAC's default non-accept path.
+
+    Used for engageable in-scope submissions whose issues revision could
+    plausibly repair. The author is invited to revise and resubmit (no limit
+    on rounds, no bias on re-evaluation).
+    """
+    template = load_template("revise-and-resubmit")
+    data = _base_data(review_data)
+    data["review_summary"] = review_summary or "Please see detailed review notes below."
+    data["specific_concerns"] = specific_concerns or "Review details available upon request."
+    return _render(template, data)
+
+
+def render_scope_reject_email(review_data: dict, review_summary: str = "",
+                            specific_concerns: str = "") -> str:
+    """Render the scope-not-suitable rejection email.
+
+    Reserved for submissions outside ICSAC's editorial scope (pseudoscience,
+    non-engageable epistemics). This is NOT the standard decline path — for
+    engageable in-scope work that needs revision, use
+    `render_revise_and_resubmit_email` instead.
+    """
+    template = load_template("scope-reject")
     data = _base_data(review_data)
     data["review_summary"] = review_summary or "Please see detailed review notes below."
     data["specific_concerns"] = specific_concerns or "Review details available upon request."
@@ -169,16 +190,34 @@ def render_accept_comment(review_data: dict, landing_url: str = "") -> str:
     """
     template = load_template("accept-comment")
     data = _base_data(review_data)
-    if landing_url:
-        data["landing_url"] = landing_url
+    record_id = review_data.get("record_id", "")
+    site_base = getattr(config, "SITE_BASE_URL", "https://icsacinstitute.org")
+    data["landing_url"] = landing_url or f"{site_base}/accepted/{record_id}"
     return _render(template, data)
 
 
-def render_decline_comment(review_data: dict, review_summary: str = "",
-                           specific_concerns: str = "") -> str:
-    """Render the markdown comment we post to the Zenodo request on decline."""
-    template = load_template("decline-comment")
+def render_revise_and_resubmit_comment(review_data: dict, review_summary: str = "",
+                                       specific_concerns: str = "") -> str:
+    """Render the markdown comment we post to the Zenodo request on R&R.
+
+    This is ICSAC's default decline path — engageable in-scope work that
+    needs revision. Use `render_scope_reject_comment` for scope-not-suitable
+    submissions.
+    """
+    template = load_template("revise-and-resubmit-comment")
     data = _base_data(review_data)
     data["review_summary"] = review_summary or "Please see review notes for details."
     data["specific_concerns"] = specific_concerns or "Review report available on request."
+    return _render(template, data)
+
+
+def render_scope_reject_comment(review_data: dict) -> str:
+    """Render the markdown comment posted to the Zenodo request on scope-reject.
+
+    Scope-not-suitable only. The scope-reject template does not carry a review
+    summary or concerns list — the verdict is "out of scope," not "revise
+    these points" — so the signature is intentionally minimal.
+    """
+    template = load_template("scope-reject-comment")
+    data = _base_data(review_data)
     return _render(template, data)

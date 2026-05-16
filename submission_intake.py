@@ -231,10 +231,10 @@ def ingest_doi(doi: str) -> dict:
 
 # ─── arXiv resolver ────────────────────────────────────────────────────────
 # Used by the icsac-submission-intake project, not by the Zenodo watcher.
-# Kept here in ingest.py so DOI-source resolution stays centralized — both
+# Kept here in submission_intake.py so DOI-source resolution stays centralized — both
 # the watcher path (Zenodo only) and the intake path (Zenodo OR arXiv) use
 # this module as the single ingestion surface. Pipeline's other modules
-# (review, scrubber, etc.) accept any review_data dict matching the shape
+# (review, redaction, etc.) accept any review_data dict matching the shape
 # extract_review_data produces, regardless of source.
 
 import xml.etree.ElementTree as _ET
@@ -277,7 +277,7 @@ def fetch_arxiv_metadata(arxiv_id: str) -> dict:
     license slot empty; intake_server records the form-supplied license
     if any, otherwise the panel sees an empty license id.
     """
-    url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
+    url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
     req = urllib.request.Request(
         url, headers={"User-Agent": "ICSAC-pipeline/1.0"}
     )

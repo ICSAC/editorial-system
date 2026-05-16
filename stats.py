@@ -6,10 +6,10 @@ the panel silently rubber-stamping as traffic scales.
 
 Metrics:
   - Total reviewed (all time) and within rolling 30-day window
-  - Recommendation mix (RECOMMEND / REVIEW_FURTHER / REJECT / PAUSED_AI_FAILURE)
+  - Recommendation mix (RECOMMEND / REVIEW_FURTHER / REVISE_AND_RESUBMIT / REJECT / PAUSED_AI_FAILURE)
   - Disagreement rate (fraction where reviewers split verdicts)
   - Per-dimension mean-of-means distribution (histogram bins)
-  - AI slop-flag rate (fraction where ai_slop_detection mean ≤ 2)
+  - AI provenance-flag rate (fraction where ai_provenance_signal mean ≤ 2)
 
 No model/vendor identities leak — this snapshot is safe to publish.
 """
@@ -23,14 +23,14 @@ import re
 from collections import Counter
 
 
-RECOMMENDATIONS = ("RECOMMEND", "REVIEW_FURTHER", "REJECT", "PAUSED_AI_FAILURE")
+RECOMMENDATIONS = ("RECOMMEND", "REVIEW_FURTHER", "REVISE_AND_RESUBMIT", "REJECT", "PAUSED_AI_FAILURE")
 DIMENSIONS = (
     "Domain Fit",
     "Methodological Transparency",
     "Internal Consistency",
     "Citation Integrity",
     "Novelty Signal",
-    "AI Slop Detection",
+    "AI Provenance Signal",
 )
 
 
@@ -189,8 +189,8 @@ def compute_stats(reviews_dir: str) -> dict:
         dim_hist[dim] = _histogram(vals)
         dim_means[dim] = round(sum(vals) / len(vals), 2) if vals else 0.0
 
-    slop_hits = sum(
-        1 for r in reviews if r["dimension_means"].get("AI Slop Detection", 5) <= 2
+    provenance_hits = sum(
+        1 for r in reviews if r["dimension_means"].get("AI Provenance Signal", 5) <= 2
     )
 
     total = len(reviews)
@@ -215,7 +215,7 @@ def compute_stats(reviews_dir: str) -> dict:
         "reject_rate_30d": _rate(rec_counts_30d.get("REJECT", 0), total_30d),
         "recommend_rate_30d": _rate(rec_counts_30d.get("RECOMMEND", 0), total_30d),
         "disagreement_rate_30d": _rate(disagree_30d, total_30d),
-        "slop_hit_rate_overall": _rate(slop_hits, total),
+        "provenance_hit_rate_overall": _rate(provenance_hits, total),
         "dimension_means_overall": dim_means,
         "dimension_distribution_overall": dim_hist,
         "rqc_audited_count": len(audited),

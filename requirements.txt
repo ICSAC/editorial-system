@@ -1,1 +1,13 @@
-# No external dependencies — stdlib only (urllib, json, subprocess)
+# Runtime dependencies.
+#
+# Most of the editorial-side pipeline uses only stdlib (urllib, json,
+# subprocess, smtplib, etc.). The intake/ subpackage adds a FastAPI
+# submission handler and renders panel reports to PDF for author email
+# attachments, which brings in a heavier dependency set.
+markdown>=3.5,<4
+
+# intake/ subpackage
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-multipart>=0.0.20,<1.0
+weasyprint==68.1

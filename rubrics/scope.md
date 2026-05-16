@@ -22,7 +22,7 @@ regardless of whether they engage ICSAC's named research programs.
     conclusions). Score 3 is not a penalty — it signals "specialist
     review needed before any decision is final." A submission scoring 3
     on Domain Fit with strong scores on all other dimensions escalates
-    to operator review rather than auto-recommend.
+    to curator review rather than auto-recommend.
 
 **2** — Methodology is partial or applied without theoretical contribution.
     Implementation-only papers, write-ups of routine engineering work,
@@ -86,10 +86,11 @@ Methodological Transparency dimension is for.
 ## Rubric change log
 
 - 2026-04-26: Rebuilt from Scope Alignment to Domain Fit. Prior rubric
-  measured topic proximity to ICSAC's six programs. New rubric measures
-  methodology bar and panel competence. ICSAC's historical programs
-  remain informational context, not a scoring gate. Clinical/specialized
-  empirical work scores 3 (specialist flag) not 1. Humanities/theology/
+  routed clinical and specialist-empirical work to out-of-scope on the
+  basis of topic distance from ICSAC's stated programs. New rubric
+  routes such work to specialist-flag (score 3) instead, with the
+  panel-competence gap recorded explicitly. ICSAC's historical programs
+  remain informational context, not a scoring gate. Humanities/theology/
   advocacy score 1. Change motivated by observed score-juicing via
-  vocabulary name-checking and flat contradiction between "all domains
-  welcome" site copy and prior rubric that auto-rejected biomedical work.
+  vocabulary name-checking and the contradiction between "all domains
+  welcome" site copy and the prior topic-distance gate.
