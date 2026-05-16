@@ -1,0 +1,12 @@
+[Unit]
+Description=ICSAC Editorial System — watcher cadence (every 6h)
+Documentation=https://github.com/ICSAC/editorial-system
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

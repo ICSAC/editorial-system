@@ -42,15 +42,14 @@ import urllib.request
 import action
 import config
 import email_render
-import ingest
+import submission_intake
 import notify
-import scrubber
+import redaction
 
 
 STATE_DIR = os.path.join(config.BASE_DIR, "state")
 STATE_PATH = os.path.join(STATE_DIR, "watched.json")
-PAIN_URL = "http://100.117.63.73:8090/pain"
-KUMA_PUSH_URL = "http://100.117.63.73:3001/api/push/bOaUZKHaJC"
+
 
 TERMINAL_STATUSES = {"accepted", "declined", "cancelled", "expired"}
 
@@ -76,8 +75,11 @@ def _save_state(state: dict) -> None:
 
 
 def _fire_pain(title: str, body: str) -> None:
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if not url:
+        return
     try:
-        req = urllib.request.Request(PAIN_URL, data=body.encode())
+        req = urllib.request.Request(url, data=body.encode())
         req.add_header("Title", title)
         urllib.request.urlopen(req, timeout=5)
     except Exception:
@@ -85,15 +87,18 @@ def _fire_pain(title: str, body: str) -> None:
 
 
 def _ping_kuma(status: str = "up", msg: str = "") -> None:
+    base = getattr(config, "KUMA_PUSH_URL", "")
+    if not base:
+        return
     try:
-        url = f"{KUMA_PUSH_URL}?status={status}&msg={urllib.request.quote(msg)}"
+        url = f"{base}?status={status}&msg={urllib.request.quote(msg)}"
         urllib.request.urlopen(url, timeout=5)
     except Exception:
         pass
 
 
 def _safe_post_comment(request_id: str, body: str, kind: str, context: str) -> bool:
-    """Run the scrubber grep-gate on a rendered Zenodo-comment body before posting.
+    """Run the redaction grep-gate on a rendered Zenodo-comment body before posting.
 
     The accept/decline comment includes text pulled from the on-disk review
     (summary, concerns). A poisoned review that survived the panel's own
@@ -107,11 +112,11 @@ def _safe_post_comment(request_id: str, body: str, kind: str, context: str) -> b
     fires so the operator can inspect and post a cleaned comment manually.
     """
     try:
-        scrubber.assert_clean(body, artifact_path=f"{kind}-comment:{request_id}")
-    except scrubber.ScrubLeak as e:
-        print(f"  {kind} comment blocked by scrub gate: {e}")
+        redaction.assert_clean(body, artifact_path=f"{kind}-comment:{request_id}")
+    except redaction.RedactionLeak as e:
+        print(f"  {kind} comment blocked by redaction gate: {e}")
         _fire_pain(
-            f"ICSAC Watcher: {kind} comment blocked by scrub gate",
+            f"ICSAC Watcher: {kind} comment blocked by redaction gate",
             (
                 f"{e}\n\nContext: {context}\n"
                 f"The branded {kind} comment was NOT posted to request {request_id}. "
@@ -172,6 +177,35 @@ def _parse_review_flags(review_path: str | None) -> tuple[bool, bool]:
     return disagreement, rqc_flag
 
 
+def _parse_review_recommendation(review_path: str | None) -> str:
+    """Read the review markdown frontmatter's `recommendation` field.
+
+    Returns the uppercased recommendation string (e.g. "REJECT",
+    "REVISE_AND_RESUBMIT", "RECOMMEND", "REVIEW_FURTHER") or an empty
+    string if the file or field is missing. Used by the decline
+    transition handler to pick the scope-reject vs R&R comment template.
+    """
+    if not review_path or not os.path.isfile(review_path):
+        return ""
+    try:
+        with open(review_path) as f:
+            text = f.read()
+    except Exception:
+        return ""
+    if not text.startswith("---\n"):
+        return ""
+    end = text.find("\n---\n", 4)
+    if end <= 0:
+        return ""
+    for line in text[4:end].splitlines():
+        if ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        if k.strip() == "recommendation":
+            return v.strip().strip('"').strip("'").upper()
+    return ""
+
+
 def _escalate_comment(rid: str, record_id: str, title: str, kind: str,
                       comment_md: str, disagreement: bool, rqc_flag: bool) -> None:
     """Suppress auto-posting the branded Zenodo comment; notify the operator.
@@ -200,10 +234,10 @@ def _escalate_comment(rid: str, record_id: str, title: str, kind: str,
         f"`python3 -c 'import action; action.post_request_comment(\"{rid}\", BODY, fmt=\"html\")'`.\n\n"
         f"--- Rendered comment body ---\n{comment_md[:3500]}"
     )
-    notify.send_telegram(msg, parse_mode=None)
+    notify.send_to_curator(msg, parse_mode=None)
     _fire_pain(
         f"ICSAC Watcher: {kind} comment held ({reason_str})",
-        f"Record {record_id}: {title[:120]}\nReason: {reason_str}\nCheck Telegram for the rendered comment body.",
+        f"Record {record_id}: {title[:120]}\nReason: {reason_str}\nCheck the curator's configured channel for the rendered comment body.",
     )
 
 
@@ -225,11 +259,11 @@ def _doi_from_record(record_id: str) -> str:
 def _review_data_from_record(record_id: str, review_path: str | None) -> dict:
     """Build the dict that email_render._base_data expects.
 
-    Pulls metadata via ingest.ingest_doi (which uses Zenodo's record API)
+    Pulls metadata via submission_intake.ingest_doi (which uses Zenodo's record API)
     and overlays the local review's recommendation/disagreement if available.
     """
     doi = _doi_from_record(record_id)
-    data = ingest.ingest_doi(doi) if doi else {"record_id": record_id}
+    data = submission_intake.ingest_doi(doi) if doi else {"record_id": record_id}
     data["record_id"] = str(record_id)
     return data
 
@@ -237,7 +271,7 @@ def _review_data_from_record(record_id: str, review_path: str | None) -> dict:
 def _generate_review(record_id: str) -> str | None:
     """Run the review panel for a record. Returns the review markdown path,
     or None on failure."""
-    import pipeline as pl
+    import editorial_workflow as pl
     doi = _doi_from_record(record_id)
     if not doi:
         print(f"  no DOI for record {record_id}; skipping review")
@@ -328,7 +362,7 @@ def _handle_accept_transition(req: dict, state_entry: dict) -> None:
             f"Could not post accept comment to request {rid} (record {record_id}): {e}",
         )
 
-    # Then register on the website (landing page + scrubbed review + stats + push)
+    # Then register on the website (landing page + redacted review + stats + push)
     try:
         action.register_accepted_paper(record_id)
     except Exception as e:
@@ -350,13 +384,22 @@ def _handle_decline_transition(req: dict, state_entry: dict) -> None:
     disagreement, rqc_flag = _parse_review_flags(state_entry.get("review_path"))
     try:
         review_data = _review_data_from_record(record_id, state_entry.get("review_path"))
-        # Pull the recommendation summary from the on-disk review if present.
-        summary, concerns = _extract_review_blurb(state_entry.get("review_path"))
-        comment_md = email_render.render_decline_comment(
-            review_data,
-            review_summary=summary,
-            specific_concerns=concerns,
-        )
+        # Route to the scope-reject vs R&R template based on the on-disk
+        # panel recommendation. REJECT routes to the scope-not-suitable
+        # template (no review_summary/concerns — the verdict is "out of
+        # scope," not "revise these points"). Everything else (R&R,
+        # REVIEW_FURTHER, or anything operator-set) takes the default
+        # R&R template with the parsed review blurb.
+        recommendation = _parse_review_recommendation(state_entry.get("review_path"))
+        if recommendation == "REJECT":
+            comment_md = email_render.render_scope_reject_comment(review_data)
+        else:
+            summary, concerns = _extract_review_blurb(state_entry.get("review_path"))
+            comment_md = email_render.render_revise_and_resubmit_comment(
+                review_data,
+                review_summary=summary,
+                specific_concerns=concerns,
+            )
         if disagreement or rqc_flag:
             _escalate_comment(rid, record_id, title, "decline", comment_md, disagreement, rqc_flag)
         else:
@@ -525,9 +568,14 @@ def main() -> int:
         return 0
     except Exception as e:
         traceback.print_exc()
+        scrubbed_tb = (
+            traceback.format_exc()
+            .replace(config.BASE_DIR, "…")
+            .replace("/home/orangepi", "…")
+        )
         _fire_pain(
             "ICSAC Watcher: tick crash",
-            f"watch.py tick failed: {e}\n\n{traceback.format_exc()[:1500]}",
+            f"watch.py tick failed: {e}\n\n{scrubbed_tb[:1500]}",
         )
         _ping_kuma("down", f"watch-tick crash: {e}")
         return 1

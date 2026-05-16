@@ -228,7 +228,16 @@ def send_accept_email(to_addr: str, rendered_template: str, send: bool = False) 
     )
 
 
-def send_reject_email(to_addr: str, rendered_template: str, send: bool = False) -> tuple[bool, str]:
+def send_revise_and_resubmit_email(to_addr: str, rendered_template: str, send: bool = False) -> tuple[bool, str]:
+    return send_email(
+        to_addr=to_addr,
+        subject=extract_subject(rendered_template),
+        body_md=extract_body(rendered_template),
+        send=send,
+    )
+
+
+def send_scope_reject_email(to_addr: str, rendered_template: str, send: bool = False) -> tuple[bool, str]:
     return send_email(
         to_addr=to_addr,
         subject=extract_subject(rendered_template),

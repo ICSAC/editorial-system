@@ -9,11 +9,12 @@ The audit runs a single hardened ``claude -p`` pass (``--tools ""``,
 Output is serialized to ``reviews/<record_id>_review_quality_control.md`` with
 YAML frontmatter carrying the ``review_quality_control_flag`` boolean.
 
-RQC does not gate acceptance. When the flag is set, ``/pain`` + Telegram fire
-so the human operator can inspect before the Zenodo accept/decline click.
-The watcher continues regardless — the editor decides.
+RQC does not gate acceptance. When the flag is set, ``/pain`` and the
+curator's configured notification channel fire so the operator can inspect
+before the Zenodo accept/decline click. The watcher continues regardless —
+the editor decides.
 
-Public publication is handled by ``scrubber.publish_public_rqc`` which strips
+Public publication is handled by ``redaction.publish_public_rqc`` which strips
 the ``injection_indicators`` dimension entirely before writing to the site.
 See rubrics/review_quality_control.md for the rubric and the two-tier policy.
 """
@@ -83,7 +84,7 @@ RQC_PROMPT_TEMPLATE = textwrap.dedent("""\
     1. rubric_adherence      — did the slot score the six panel rubric dims
                                (domain_fit, methodological_transparency,
                                internal_consistency, citation_integrity,
-                               novelty_signal, ai_slop_detection) with correct
+                               novelty_signal, ai_provenance_signal) with correct
                                names and 1-5 scale?
     2. internal_consistency  — do justifications support scores; does summary
                                match the per-dimension narrative and the
@@ -212,7 +213,7 @@ def _normalize(rqc: dict) -> dict:
     """Ensure the parsed dict has the expected shape; fill safe defaults.
 
     Anchor invariants even if the model emits partial JSON, so downstream
-    writers and the scrubber don't crash.
+    writers and the redaction don't crash.
     """
     out = {
         "review_quality_control_flag": bool(rqc.get("review_quality_control_flag", False)),
@@ -351,7 +352,7 @@ def save_rqc(review_data: dict, rqc: dict) -> str:
 
 
 def fire_alerts(review_data: dict, rqc: dict, rqc_path: str) -> None:
-    """Fire Telegram + /pain when the flag is set. Best-effort."""
+    """Fire curator alert + /pain when the flag is set. Best-effort."""
     if not rqc.get("review_quality_control_flag"):
         return
     title = review_data.get("title", "Untitled")
@@ -370,19 +371,21 @@ def fire_alerts(review_data: dict, rqc: dict, rqc_path: str) -> None:
     )
     try:
         import notify
-        notify.send_telegram(msg, parse_mode=None)
+        notify.send_to_curator(msg, parse_mode=None)
     except Exception:
         pass
-    try:
-        import urllib.request
-        req = urllib.request.Request(
-            "http://100.117.63.73:8090/pain",
-            data=f"RQC flagged for {title} ({doi})".encode(),
-        )
-        req.add_header("Title", "ICSAC Pipeline: Review Quality Control Flagged")
-        urllib.request.urlopen(req, timeout=5)
-    except Exception:
-        pass
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if url:
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                url,
+                data=f"RQC flagged for {title} ({doi})".encode(),
+            )
+            req.add_header("Title", "ICSAC Pipeline: Review Quality Control Flagged")
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass
 
 
 def audit_review(review_data: dict, panel_review_md: str) -> tuple[str, dict]:

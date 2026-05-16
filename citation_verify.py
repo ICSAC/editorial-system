@@ -38,7 +38,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import config
-import ingest
+import submission_intake
 
 
 CITATION_USER_AGENT = (
@@ -253,10 +253,10 @@ def extract_citations(full_text: str, record_id: str) -> list[dict]:
 
 
 def _fetch_arxiv(arxiv_id: str) -> dict | None:
-    """Lookup arXiv metadata. Reuses ingest.fetch_arxiv_metadata; returns
+    """Lookup arXiv metadata. Reuses submission_intake.fetch_arxiv_metadata; returns
     a verification-shaped dict or None on miss."""
     try:
-        meta = ingest.fetch_arxiv_metadata(arxiv_id)
+        meta = submission_intake.fetch_arxiv_metadata(arxiv_id)
     except Exception:
         return None
     if not meta or not meta.get("title"):
@@ -289,7 +289,7 @@ def _search_arxiv(query_terms: list[str], year: int | None = None) -> dict | Non
     # into independent OR-tokens.
     expr = "+AND+".join(f"all:%22{urllib.parse.quote(p)}%22" for p in parts[:3])
     url = (
-        f"http://export.arxiv.org/api/query?search_query={expr}"
+        f"https://export.arxiv.org/api/query?search_query={expr}"
         f"&max_results=5&sortBy=relevance"
     )
     req = urllib.request.Request(
@@ -354,9 +354,9 @@ def _search_arxiv(query_terms: list[str], year: int | None = None) -> dict | Non
 
 
 def _fetch_crossref(doi: str) -> dict | None:
-    """Internal Crossref lookup. Defers to ingest.fetch_crossref_metadata."""
+    """Internal Crossref lookup. Defers to submission_intake.fetch_crossref_metadata."""
     try:
-        meta = ingest.fetch_crossref_metadata(doi)
+        meta = submission_intake.fetch_crossref_metadata(doi)
     except Exception:
         return None
     if not meta or not meta.get("title"):
@@ -375,7 +375,7 @@ def _search_semanticscholar(query: str, year: int | None = None) -> dict | None:
     """Internal S2 search. Returns the best-matching candidate (top hit)
     as a verification-shaped dict, or None on miss / network error."""
     try:
-        results = ingest.search_semanticscholar(query)
+        results = submission_intake.search_semanticscholar(query)
     except Exception:
         return None
     if not results:

@@ -1,10 +1,28 @@
+# Local config
 config.py
-downloads/
+.env
+
+# Python build
 __pycache__/
 *.pyc
-.env
+.venv/
+
+# Operator runtime state (not tracked)
 state/
+downloads/
+*.log
+*.eml
+.claude/
+.active-incidents/
+
+# Submission state (intake side)
+/icsac-submissions/
+/submissions/
+
+# Review artifacts (per-run; not tracked)
 reviews/.bak-*/
 reviews/raw/
 reviews/*_citations.json
 reviews/*_citations.md
+audit-log*.jsonl
+test/_outbox/

@@ -29,7 +29,7 @@ import subprocess
 from typing import Any, Optional
 
 
-WEBSITE_REPO = os.path.expanduser("~/Desktop/icsac/icsacinstitute.org")
+WEBSITE_REPO = os.environ.get("ICSAC_WEBSITE_REPO", "")
 REGISTRY_PATH = os.path.join(WEBSITE_REPO, "src/data/accepted.json")
 PUBLICATIONS_BASE_URL = "https://icsacinstitute.org/publications"
 
@@ -101,7 +101,13 @@ def upsert_entry(proto: dict) -> dict:
 
     Caller is responsible for staging any ancillary files (public-review
     HTML, etc.) and then calling commit_and_push().
+
+    Returns an empty dict when ICSAC_WEBSITE_REPO is not configured (the
+    Zenodo accept itself still proceeds; the registry publish is skipped).
     """
+    if not WEBSITE_REPO:
+        print("  Registry publish skipped: ICSAC_WEBSITE_REPO not configured")
+        return {}
     if proto.get("source") not in VALID_SOURCES:
         raise ValueError(
             f"invalid source {proto.get('source')!r}; want one of {sorted(VALID_SOURCES)}"
@@ -167,23 +173,28 @@ def stage_public_review_for_slug(
     slug: str,
     reviews_dir: str,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Scrub the panel review + RQC keyed by `review_key`, then rename
+    """Redact the panel review + RQC keyed by `review_key`, then rename
     the generated public-reviews/<key>.{md,html} files to <slug>.{md,html}
     so /publications/<slug> can find them.
 
-    `review_key` is the prefix scrubber.publish_public_review searches
+    `review_key` is the prefix redaction.publish_public_review searches
     for under reviews_dir — record_id for Zenodo-watcher-path papers,
     sub_id (e.g. ICSAC-SUB-00006) for intake-path papers.
 
     Returns (review_md_path, rqc_md_path) — either may be None if no
-    matching review was found. ScrubLeak from the underlying scrubber
+    matching review was found. RedactionLeak from the underlying redaction
     bubbles up; callers gate it the same way action.accept_request does.
+
+    Returns (None, None) when ICSAC_WEBSITE_REPO is not configured.
     """
-    import scrubber  # zenodo-pipeline module
-    review_md_orig = scrubber.publish_public_review(
+    if not WEBSITE_REPO:
+        print("  Public-review stage skipped: ICSAC_WEBSITE_REPO not configured")
+        return (None, None)
+    import redaction  # editorial system module
+    review_md_orig = redaction.publish_public_review(
         review_key, reviews_dir, WEBSITE_REPO,
     )
-    rqc_md_orig = scrubber.publish_public_rqc(
+    rqc_md_orig = redaction.publish_public_rqc(
         review_key, reviews_dir, WEBSITE_REPO,
     )
 
@@ -219,7 +230,11 @@ def commit_and_push(message: str, extra_paths: Optional[list[str]] = None) -> No
 
     No-op when the working tree is clean. Best-effort `git pull --rebase`;
     push failures raise so callers can surface a /pain signal.
+
+    No-op when ICSAC_WEBSITE_REPO is not configured.
     """
+    if not WEBSITE_REPO:
+        return
     def run(*cmd, check=True):
         return subprocess.run(
             cmd, cwd=WEBSITE_REPO, capture_output=True, text=True, check=check
@@ -237,7 +252,7 @@ def commit_and_push(message: str, extra_paths: Optional[list[str]] = None) -> No
         if os.path.exists(full):
             run("git", "add", rel)
             # If the path is a markdown file, also stage the sibling .html
-            # (scrubber writes pairs).
+            # (redaction writes pairs).
             if rel.endswith(".md"):
                 html_rel = rel[:-3] + ".html"
                 if os.path.exists(os.path.join(WEBSITE_REPO, html_rel)):

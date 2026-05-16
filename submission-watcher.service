@@ -1,0 +1,23 @@
+[Unit]
+Description=ICSAC Editorial System — community-request watcher
+Documentation=https://github.com/ICSAC/editorial-system
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=icsac
+Group=icsac
+WorkingDirectory=/opt/icsac/editorial-system
+EnvironmentFile=/etc/icsac/editorial.env
+ExecStart=/usr/bin/python3 /opt/icsac/editorial-system/editorial_workflow.py watch-tick
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/icsac/editorial-system /var/lib/icsac/site
+
+[Install]
+WantedBy=multi-user.target

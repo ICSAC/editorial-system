@@ -6,11 +6,11 @@ CF Pages to rebuild. That rebuild publishes an ICSAC-branded landing page
 at https://icsacinstitute.org/accepted/<record_id> so LinkedIn and Facebook
 shares show ICSAC metadata rather than generic Zenodo cards.
 
-The accept path also scrubs the internal review (reviews/<id>_*.md) and
+The accept path also redacts the internal review (reviews/<id>_*.md) and
 writes a publication-safe copy to the website repo at
 src/data/public-reviews/<record_id>.md, embedded on the landing page. The
-scrubber's grep-gate aborts publication if any forbidden token survives —
-a scrub leak fires /pain and leaves the Zenodo accept intact but the
+redaction's grep-gate aborts publication if any forbidden token survives —
+a redaction leak fires /pain and leaves the Zenodo accept intact but the
 registry + review unpushed.
 """
 
@@ -25,7 +25,7 @@ import urllib.error
 
 import config
 import publications
-import scrubber
+import redaction
 import stats as stats_mod
 
 
@@ -102,7 +102,7 @@ def accept_request(request_id: str, comment: str = "",
     and posted with the action — Zenodo notifies the author via its own email
     machinery. The comment points to the public landing page on icsacinstitute.org.
 
-    Registry update (landing page + scrubbed review + stats) runs after accept
+    Registry update (landing page + redacted review + stats) runs after accept
     succeeds. Registry failure does NOT fail the Zenodo accept — it is logged
     and skipped (a /pain alert fires).
     """
@@ -122,16 +122,16 @@ def accept_request(request_id: str, comment: str = "",
                 register_accepted_paper(record_id)
             else:
                 print(f"  Could not derive record_id from request {request_id} — registry not updated.")
-        except scrubber.ScrubLeak as e:
-            print(f"  Accept succeeded on Zenodo BUT scrub leak blocked publication: {e}")
+        except redaction.RedactionLeak as e:
+            print(f"  Accept succeeded on Zenodo BUT redaction leak blocked publication: {e}")
             _fire_pain(
-                title="ICSAC Pipeline: Review Scrub Leak",
+                title="ICSAC Pipeline: Review Redaction Leak",
                 body=(
                     f"Zenodo accept succeeded for request {request_id} but the "
-                    f"scrubber blocked publication: {e}. The Zenodo acceptance "
+                    f"redaction blocked publication: {e}. The Zenodo acceptance "
                     f"is in effect; the landing page + public review are NOT "
                     f"published. Inspect the raw review, edit out the leak, "
-                    f"then rerun `python3 scrubber.py {record_id or '<id>'}` "
+                    f"then rerun `python3 redaction.py {record_id or '<id>'}` "
                     f"and commit manually."
                 ),
             )
@@ -149,11 +149,12 @@ def accept_request(request_id: str, comment: str = "",
 
 
 def _fire_pain(title: str, body: str) -> None:
-    """Direct ntfy /pain POST to the orchestrator. Best-effort, never raises."""
+    """Direct ntfy /pain POST to the monitoring endpoint. Best-effort, never raises."""
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if not url:
+        return
     try:
-        req = urllib.request.Request(
-            "http://100.117.63.73:8090/pain", data=body.encode()
-        )
+        req = urllib.request.Request(url, data=body.encode())
         req.add_header("Title", title)
         urllib.request.urlopen(req, timeout=5)
     except Exception:
@@ -163,19 +164,34 @@ def _fire_pain(title: str, body: str) -> None:
 def decline_request(request_id: str, comment: str = "",
                     review_data: dict | None = None,
                     review_summary: str = "",
-                    specific_concerns: str = "") -> bool:
+                    specific_concerns: str = "",
+                    verdict: str = "revise_and_resubmit") -> bool:
     """Decline a community inclusion request.
 
-    If review_data is supplied, an ICSAC-branded decline comment is rendered
-    with the review summary + concerns and posted with the action. Zenodo
-    notifies the author via its own email machinery.
+    `verdict` controls the comment template used when one is auto-rendered:
+      - "revise_and_resubmit" (default) — ICSAC's standard decline path for
+        engageable in-scope work; uses the revise-and-resubmit-comment
+        template with review_summary + specific_concerns.
+      - "reject" — scope-not-suitable / pseudoscience escape hatch; uses the
+        scope-reject-comment template with no summary/concerns (the verdict
+        is "out of scope," not "revise these points").
+
+    "decline" is Zenodo's API verb for either outcome; the verdict here only
+    governs WHICH branded comment we attach, not the action call itself.
+
+    If review_data is supplied, the appropriate ICSAC-branded comment is
+    rendered and posted with the action. Zenodo notifies the author via its
+    own email machinery.
     """
     if review_data and not comment:
         import email_render
-        comment = email_render.render_decline_comment(
-            review_data, review_summary=review_summary,
-            specific_concerns=specific_concerns,
-        )
+        if verdict == "reject":
+            comment = email_render.render_scope_reject_comment(review_data)
+        else:
+            comment = email_render.render_revise_and_resubmit_comment(
+                review_data, review_summary=review_summary,
+                specific_concerns=specific_concerns,
+            )
     return _action_request(request_id, "decline", comment)
 
 
@@ -289,10 +305,10 @@ def _extract_registry_entry(record_id: str, metadata: dict,
 
 
 def _publish_public_review(record_id: str) -> str | None:
-    """Scrub the internal review and stage it at public-reviews/<id>.md.
+    """Redact the internal review and stage it at public-reviews/<id>.md.
 
     Returns the path written, or None if no internal review exists yet.
-    Raises scrubber.ScrubLeak when a forbidden token slips through; the
+    Raises redaction.RedactionLeak when a forbidden token slips through; the
     caller (accept_request) converts that to a /pain signal.
     """
     reviews_dir = getattr(config, "REVIEWS_DIR", os.path.join(
@@ -309,14 +325,14 @@ def _publish_public_review(record_id: str) -> str | None:
     if not present:
         print(f"  No internal review for {record_id}; public review not staged.")
         return None
-    return scrubber.publish_public_review(record_id, reviews_dir, WEBSITE_REPO)
+    return redaction.publish_public_review(record_id, reviews_dir, WEBSITE_REPO)
 
 
 def _publish_public_rqc(record_id: str) -> str | None:
-    """Scrub the internal RQC audit and stage its redacted public twin.
+    """Redact the internal RQC audit and stage its redacted public twin.
 
     Returns the path written, or None if no RQC file exists yet (older
-    reviews pre-RQC-rollout). Raises scrubber.ScrubLeak if any forbidden
+    reviews pre-RQC-rollout). Raises redaction.RedactionLeak if any forbidden
     token — including a reference to the redacted injection_indicators
     dimension — survives. The caller converts that to a /pain signal.
     """
@@ -325,16 +341,16 @@ def _publish_public_rqc(record_id: str) -> str | None:
     ))
     if not os.path.isdir(reviews_dir):
         return None
-    return scrubber.publish_public_rqc(record_id, reviews_dir, WEBSITE_REPO)
+    return redaction.publish_public_rqc(record_id, reviews_dir, WEBSITE_REPO)
 
 
 def register_accepted_paper(record_id: str) -> None:
-    """Append/update the publications registry, stage the scrubbed review, push.
+    """Append/update the publications registry, stage the redacted review, push.
 
     Order:
       1) Fetch Zenodo metadata + upsert registry entry in accepted.json
-      2) Scrub internal review → src/data/public-reviews/<id>.md (gated)
-      3) Scrub internal RQC → src/data/public-reviews/<id>_review_quality_control.md (gated)
+      2) Redact internal review → src/data/public-reviews/<id>.md (gated)
+      3) Redact internal RQC → src/data/public-reviews/<id>_review_quality_control.md (gated)
       4) Refresh panel stats snapshot
       5) git add all, commit, pull --rebase, push
     """
@@ -358,9 +374,9 @@ def register_accepted_paper(record_id: str) -> None:
         f"(legacy /accepted/{record_id} also live)"
     )
     if review_path:
-        print(f"  Scrubbed review staged at {review_path}")
+        print(f"  Redacted review staged at {review_path}")
     if rqc_path:
-        print(f"  Scrubbed RQC staged at {rqc_path}")
+        print(f"  Redacted RQC staged at {rqc_path}")
     if stats_path:
         print(f"  Panel stats snapshot refreshed at {stats_path}")
 
