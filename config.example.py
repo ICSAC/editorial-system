@@ -1,9 +1,9 @@
-"""ICSAC Open Review Pipeline — Configuration.
+"""ICSAC Editorial System — Configuration.
 
 Copy this file to config.py. Secrets are loaded from environment variables.
-Set them in ~/.config/zenodo-pipeline.env (loaded by systemd EnvironmentFile).
+Set them in /etc/icsac/editorial.env (loaded by systemd EnvironmentFile=).
 
-For manual runs: source ~/.config/zenodo-pipeline.env && export ZENODO_TOKEN TELEGRAM_TOKEN TELEGRAM_CHAT_ID
+For manual runs: source /etc/icsac/editorial.env && export ZENODO_TOKEN TELEGRAM_TOKEN TELEGRAM_CHAT_ID
 """
 
 import os
@@ -11,7 +11,7 @@ import os
 import os as _os
 
 
-def _load_env_file(path: str = "~/.config/zenodo-pipeline.env") -> None:
+def _load_env_file(path: str = "/etc/icsac/editorial.env") -> None:
     """Self-load env file if vars not already set. Lets Python invocations
     work without ceremony — systemd EnvironmentFile= still wins when present.
     """
@@ -37,6 +37,22 @@ ZENODO_API = "https://zenodo.org/api"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# Optional: Telegram supergroup-thread routing. When set, editorial-system
+# messages pin to a specific topic so notifications can share a bot/supergroup
+# with other operator monitoring without crossing streams.
+TELEGRAM_THREAD_ID = os.environ.get("TELEGRAM_THREAD_ID", "")
+
+# Optional: IMAP draft-save mode. When email_send is invoked with draft=True,
+# the rendered MIME message is APPENDed to Gmail's Drafts folder via IMAP
+# (operator manually reviews + sends from Gmail UI). Leave unset to disable
+# draft mode entirely.
+IMAP_HOST = os.environ.get("IMAP_HOST", "imap.gmail.com")
+IMAP_PORT = int(os.environ.get("IMAP_PORT", "993"))
+IMAP_USER = os.environ.get("IMAP_USER", "")
+IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
+IMAP_DRAFTS_FOLDER = os.environ.get("IMAP_DRAFTS_FOLDER", "[Gmail]/Drafts")
+
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
@@ -123,13 +139,18 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "info@icsacinstitute.org")
 REPLY_TO_EMAIL = os.environ.get("REPLY_TO_EMAIL", "info@icsacinstitute.org")
 
-NTFY_URL = "http://100.117.63.73:8090/backups"
+NTFY_PAIN_URL = os.environ.get("NTFY_PAIN_URL", "")
+NTFY_BACKUPS_URL = os.environ.get("NTFY_BACKUPS_URL", "")
+BRAIN_URL = os.environ.get("BRAIN_URL", "")
+KUMA_PUSH_URL = os.environ.get("KUMA_PUSH_URL", "")
 
 COMMUNITY_ID = "icsac"
-GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScnyu0dhDofYfGNM6OGdd4_eoPzWBbvLZs8KxWCL-9Xx_6aCQ/viewform"
+GOOGLE_FORM_URL = os.environ.get("GOOGLE_FORM_URL", "https://example.com/your-community-signup-form")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Runtime output directory — created on first run, gitignored.
 REVIEWS_DIR = os.path.join(BASE_DIR, "reviews")
+# Runtime output directory — created on first run, gitignored.
 DOWNLOADS_DIR = os.path.join(BASE_DIR, "downloads")
 RUBRICS_DIR = os.path.join(BASE_DIR, "rubrics")
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
@@ -146,5 +167,10 @@ RUBRIC_DIMENSIONS = [
     "internal_consistency",
     "citation_integrity",
     "novelty_signal",
-    "ai_slop_detection",
+    "ai_provenance_signal",
 ]
+
+# Path to the institute's website repo (used by publications.py to commit
+# accepted-paper landing pages + redacted reviews). Empty disables the
+# website-registry push; the Zenodo accept itself still proceeds.
+ICSAC_WEBSITE_REPO = os.environ.get("ICSAC_WEBSITE_REPO", "")

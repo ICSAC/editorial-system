@@ -8,12 +8,12 @@ check whether the operator has published, and on transition:
 
   1. Update the submission state.json with deposit_doi + deposit_url.
   2. Upsert a publications-registry entry with the now-real DOI.
-  3. Stage the scrubbed panel review under public-reviews/<slug>.{md,html}
+  3. Stage the redacted panel review under public-reviews/<slug>.{md,html}
      and commit + push to the website repo.
   4. Send a post-publish notification email to the author with the DOI
      and the canonical icsacinstitute.org/publications/<slug> permalink.
 
-Invoked from pipeline.py batch-tick. Cost is bounded — one Zenodo HTTP
+Invoked from editorial_workflow.py batch-tick. Cost is bounded — one Zenodo HTTP
 hit per draft in `awaiting_publish` state. Failures on individual drafts
 fire /pain but never block other drafts in the same poll.
 """
@@ -35,13 +35,9 @@ import publications
 
 
 SUBMISSIONS_ROOT = Path.home() / "icsac-submissions"
-INTAKE_DIR = Path.home() / "icsac-submission-intake"
-
-# Reach into intake for the author-facing notify helper. Pipeline modules
-# don't import intake by default; insert path on first use so the dep is
-# explicit at call site rather than a module-level surprise.
-if str(INTAKE_DIR) not in sys.path:
-    sys.path.insert(0, str(INTAKE_DIR))
+# Intake-side author-notify helper is imported lazily inside _emit_published()
+# below — keeps the watcher decoupled from FastAPI / WeasyPrint at module-
+# import time.
 
 
 def _now_iso() -> str:
@@ -51,11 +47,12 @@ def _now_iso() -> str:
 
 
 def _fire_pain(title: str, body: str) -> None:
-    """Direct ntfy /pain POST to the orchestrator. Best-effort, never raises."""
+    """Direct ntfy /pain POST to the monitoring endpoint. Best-effort, never raises."""
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if not url:
+        return
     try:
-        req = urllib.request.Request(
-            "http://100.117.63.73:8090/pain", data=body.encode()
-        )
+        req = urllib.request.Request(url, data=body.encode())
         req.add_header("Title", title)
         urllib.request.urlopen(req, timeout=5)
     except Exception:
@@ -102,8 +99,8 @@ def _bare_doi(s: str) -> str:
 
 
 def _proto_authors_from_submission(submission: dict) -> list[str]:
-    """Mirror submission_worker._proto_authors — kept here to avoid an
-    intake-side import for a five-line helper."""
+    """Mirror intake.submission_worker._proto_authors — kept here to avoid
+    pulling in the intake subpackage for a five-line helper."""
     out: list[str] = []
     for c in submission.get("creators") or []:
         if isinstance(c, dict):
@@ -124,7 +121,7 @@ def _proto_authors_from_submission(submission: dict) -> list[str]:
 
 
 def _register_published(sub_dir: Path, submission: dict, deposit: dict) -> dict:
-    """Build the proto, upsert publications, stage scrubbed review, push.
+    """Build the proto, upsert publications, stage redacted review, push.
 
     Returns the canonical entry (with .slug populated). Caller updates
     state.json + sends author email after this returns.
@@ -174,7 +171,7 @@ def _notify_author_published(submission: dict, sub_id: str,
                              entry: dict, deposit_doi: str,
                              deposit_url: str) -> bool:
     """Send the short post-publish email. Best-effort; logs and returns False on failure."""
-    import notify_author as intake_notify  # noqa: WPS433
+    from intake import notify_author as intake_notify  # noqa: WPS433
     form = submission.get("form") or {}
     to = form.get("email")
     if not to:
@@ -204,7 +201,7 @@ def poll_drafts() -> dict:
     """Walk every submission with a staged draft, register on transition.
 
     Returns a small summary dict suitable for inclusion in the batch-tick
-    Telegram digest: {checked, published, skipped, errors}.
+    curator digest: {checked, published, skipped, errors}.
     """
     drafts = _list_awaiting_publish()
     summary = {

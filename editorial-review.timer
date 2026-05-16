@@ -1,0 +1,11 @@
+[Unit]
+Description=ICSAC Editorial System — community-request poller cadence (every 30 minutes)
+Documentation=https://github.com/ICSAC/editorial-system
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

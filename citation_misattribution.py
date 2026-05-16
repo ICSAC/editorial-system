@@ -19,8 +19,7 @@ Cost architecture (from build prompt):
 
 Total claude calls per submission for citation work: 2. Total OR calls: 1.
 The misattribution check MUST stay on OpenRouter — this is the operator's
-hard rule. Burning claude on per-citation misattribution would torch the
-Anthropic Max 5x window in a single panel run.
+hard rule. Burning claude on per-citation misattribution would be prohibitively expensive in a single panel run.
 """
 
 import json

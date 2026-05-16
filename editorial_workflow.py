@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""ICSAC Open Review Pipeline — Main orchestrator."""
+"""ICSAC Editorial System — workflow entry point."""
 
 import argparse
 import sys
 
 import config
-import ingest
+import submission_intake
 import review
 import notify
 import action
@@ -13,18 +13,15 @@ import email_render
 import email_send
 
 
-NTFY_PAIN = "http://100.117.63.73:8090/pain"
-NTFY_BACKUPS = "http://100.117.63.73:8090/backups"
-BRAIN_URL = "http://100.117.63.73:8090/brain"
-UPTIME_KUMA_PUSH = "http://100.117.63.73:3001/api/push/bOaUZKHaJC"
-
-
 def fire_pain(title, message):
-    """Send pain signal to orchestrator. Best-effort, never raises."""
+    """Send pain signal to the operator's monitoring endpoint. Best-effort, never raises."""
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if not url:
+        return
     import urllib.request
     try:
-        req = urllib.request.Request(NTFY_PAIN, data=message.encode())
-        req.add_header("Title", f"OPi3B: {title}")
+        req = urllib.request.Request(url, data=message.encode())
+        req.add_header("Title", title)
         urllib.request.urlopen(req, timeout=5)
     except Exception:
         pass
@@ -32,11 +29,14 @@ def fire_pain(title, message):
 
 def fire_brain(domain, sigtype, source, metric, value=1):
     """Push a brain signal. Best-effort, never raises."""
+    url = getattr(config, "BRAIN_URL", "")
+    if not url:
+        return
     import urllib.request, json
     try:
         title = f"{domain}|{sigtype}|{source}|{metric}"
         req = urllib.request.Request(
-            BRAIN_URL,
+            url,
             data=json.dumps({"value": value}).encode(),
         )
         req.add_header("Title", title)
@@ -53,10 +53,13 @@ def fire_heartbeat(status="up", msg="OK"):
     end to end. Manual review invocations should NOT fire this (they'd create
     false 'all healthy' signals between scheduled polls).
     """
+    base = getattr(config, "KUMA_PUSH_URL", "")
+    if not base:
+        return
     import urllib.request, urllib.parse
     try:
         params = urllib.parse.urlencode({"status": status, "msg": msg, "ping": ""})
-        urllib.request.urlopen(f"{UPTIME_KUMA_PUSH}?{params}", timeout=5)
+        urllib.request.urlopen(f"{base}?{params}", timeout=5)
     except Exception:
         pass
 
@@ -65,7 +68,7 @@ def check_model_availability(timeout: int = 15) -> dict:
     """Fetch OR's live free-tier catalog and report per-configured-slot reachability.
 
     Returns a structured dict so both the CLI (refresh-models) and the batch
-    tick orchestrator can share one implementation. A slot is 'dead' when
+    tick scheduler can share one implementation. A slot is 'dead' when
     EVERY entry in its fallback chain is missing from the live catalog —
     OpenRouter's intra-slot fallback cannot rescue a fully-missing chain.
 
@@ -122,7 +125,7 @@ def review_doi(doi: str, skip_notify: bool = False) -> dict:
     # Ingest
     print("\n[1/3] Ingesting from Zenodo...")
     try:
-        review_data = ingest.ingest_doi(doi)
+        review_data = submission_intake.ingest_doi(doi)
     except Exception as e:
         print(f"  FAILED: {e}")
         return {"doi": doi, "error": str(e)}
@@ -133,7 +136,7 @@ def review_doi(doi: str, skip_notify: bool = False) -> dict:
     print(f"  PDF: {pdf_status}")
 
     full_text_len = len(review_data.get("full_text", ""))
-    if review_data.get("pdf_path") and full_text_len < ingest.PDF_TEXT_MIN_CHARS:
+    if review_data.get("pdf_path") and full_text_len < submission_intake.PDF_TEXT_MIN_CHARS:
         msg = (
             f"PDF has no usable text layer ({full_text_len} chars extracted). "
             f"ICSAC requires text-layer PDFs — image-only scans and "
@@ -170,11 +173,13 @@ def review_doi(doi: str, skip_notify: bool = False) -> dict:
     else:
         print("\n[3/3] Notifications skipped.")
 
-    fire_brain("business", "reward", "zenodo_pipeline", "review_completed", 1)
+    fire_brain("business", "reward", "editorial_system", "review_completed", 1)
     if rec == "RECOMMEND":
-        fire_brain("business", "event", "zenodo_pipeline", "recommend", 1)
+        fire_brain("business", "event", "editorial_system", "recommend", 1)
+    elif rec == "REVISE_AND_RESUBMIT":
+        fire_brain("business", "event", "editorial_system", "revise_and_resubmit", 1)
     elif rec == "REJECT":
-        fire_brain("business", "event", "zenodo_pipeline", "reject", 1)
+        fire_brain("business", "event", "editorial_system", "reject", 1)
 
     return {
         "doi": doi,
@@ -195,7 +200,7 @@ def poll_community() -> None:
         return
 
     print(f"  Found {len(requests)} request(s).")
-    fire_brain("business", "state", "zenodo_pipeline", "pending_requests", len(requests))
+    fire_brain("business", "state", "editorial_system", "pending_requests", len(requests))
     for req in requests:
         topic = req.get("topic", {})
         record = topic.get("record", "")
@@ -238,11 +243,14 @@ def main():
     refresh.add_argument("--check-exit", action="store_true",
                          help="Exit 2 if any configured slot has no reachable model (for cron health checks)")
 
-    sub.add_parser("batch-tick", help="Run the twice-daily batch orchestrator: model check + watch-tick + summary")
+    sub.add_parser("batch-tick", help="Run the twice-daily batch workflow: model check + watch-tick + summary")
 
-    em = sub.add_parser("email", help="Render and (optionally) send accept/reject/invite emails")
-    em.add_argument("kind", choices=["accept", "reject", "invite"],
-                    help="accept = sends accept + community invite; reject = rejection only; invite = resend invite only")
+    em = sub.add_parser("email", help="Render and (optionally) send accept / revise-and-resubmit / reject / invite emails")
+    em.add_argument("kind", choices=["accept", "revise-and-resubmit", "reject", "invite"],
+                    help=("accept = sends accept + community invite; "
+                          "revise-and-resubmit = default decline path (engageable in-scope work); "
+                          "reject = woo template (scope-not-suitable / pseudoscience only — NOT the standard decline path); "
+                          "invite = resend invite only"))
     em.add_argument("doi", help="Zenodo DOI of the paper")
     em.add_argument("to", help="Recipient email address")
     em.add_argument("--send", action="store_true", help="Actually send (default: dry-run preview)")
@@ -353,7 +361,7 @@ def main():
                                "still_draft": 0, "errors": 1,
                                "transitions": []}
 
-        print("[4/4] Summary Telegram...")
+        print("[4/4] Summary curator alert...")
         try:
             dead_slots = [s["index"] for s in mod.get("slots", []) if s["dead"]]
             if mod["fetched"]:
@@ -378,15 +386,15 @@ def main():
                 f"{publish_line}\n\n"
                 f"Transitions (accept/decline) always run regardless of model state."
             )
-            notify.send_telegram(msg, parse_mode=None)
+            notify.send_to_curator(msg, parse_mode=None)
         except Exception as e:
-            print(f"  summary Telegram failed (non-fatal): {e}")
+            print(f"  summary curator alert failed (non-fatal): {e}")
 
         sys.exit(rc)
 
     elif args.command == "email":
         import time
-        review_data = ingest.ingest_doi(args.doi)
+        review_data = submission_intake.ingest_doi(args.doi)
 
         def _deliver(label: str, rendered: str, send_fn) -> bool:
             print(f"\n=== {label} ===")
@@ -412,10 +420,14 @@ def main():
             if not args.send:
                 print("\n(dry-run; pass --send to actually deliver both)")
             sys.exit(0 if (ok1 and ok2) else 1)
+        elif args.kind == "revise-and-resubmit":
+            ok = _deliver("REVISE-AND-RESUBMIT EMAIL",
+                          email_render.render_revise_and_resubmit_email(review_data),
+                          email_send.send_revise_and_resubmit_email)
         elif args.kind == "reject":
-            ok = _deliver("REJECT EMAIL",
-                          email_render.render_reject_email(review_data),
-                          email_send.send_reject_email)
+            ok = _deliver("SCOPE-REJECT EMAIL (scope-not-suitable)",
+                          email_render.render_scope_reject_email(review_data),
+                          email_send.send_scope_reject_email)
         else:  # invite
             ok = _deliver("COMMUNITY INVITE",
                           email_render.render_community_invite_email(review_data),
@@ -445,7 +457,7 @@ if __name__ == "__main__":
         sys.exit(130)
     except Exception as exc:
         fire_pain(
-            "zenodo-pipeline failed",
+            "editorial-system failed",
             f"Pipeline crashed: {type(exc).__name__}: {exc}",
         )
         raise
