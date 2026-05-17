@@ -270,7 +270,7 @@ def _render_cover(paper: dict) -> bytes:
   </dl>
 
   <div class="venue">
-    <strong>Peer-reviewed at <em>Persistence</em></strong> &mdash; the Institute's annual transdisciplinary journal. The full editorial record &mdash; AI panel reviews, Review Quality Control audit, and curator verdict &mdash; is publicly available at the URL below.
+    <strong>Peer-reviewed by ICSAC</strong> &mdash; the Institute's open editorial record. The full record &mdash; AI panel reviews, Review Quality Control audit, and curator verdict &mdash; is publicly available at the URL below.
   </div>
 
   <div class="record">
