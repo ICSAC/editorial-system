@@ -209,3 +209,11 @@ If you want to know exactly which prompts the panel saw, which rubrics it
 applied, which citations it verified, and which form fields the submission
 handler collected before forming its recommendation: read the source. That is
 why this repository exists.
+
+## Support this work
+
+ICSAC operates on bootstrap funding and private donations. Open peer review for
+independent and heterodox researchers is the kind of infrastructure no one is
+paid to build. If you want to help keep it running:
+
+**[manifund.org/projects/icsac-ai-assisted-peer-review-for-independent-researchers](https://manifund.org/projects/icsac-ai-assisted-peer-review-for-independent-researchers)**
