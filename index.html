@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ICSAC Editorial System</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Open-source AI editorial pipeline for ICSAC and Persistence journal submissions.">
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; padding: 0; background: #fafaf9; color: #1c1917; font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  @media (prefers-color-scheme: dark) { html, body { background: #0c0a09; color: #f5f5f4; } a { color: #93c5fd; } code { background: #1c1917; } }
+  main { max-width: 720px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.65rem; font-weight: 600; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  .sub { color: #78716c; font-size: .95rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin: 2.25rem 0 .5rem; }
+  p { margin: 0 0 1rem; }
+  a { color: #1d4ed8; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { background: #f5f5f4; padding: .1em .35em; border-radius: 3px; font-size: .9em; }
+  .nav { display: flex; flex-wrap: wrap; gap: 1.25rem; margin: 1.5rem 0 2rem; font-size: .95rem; }
+  .nav a { font-weight: 500; }
+  .note { font-size: .85rem; color: #78716c; border-left: 2px solid #d6d3d1; padding: .25rem 0 .25rem .85rem; margin: 2rem 0; }
+  @media (prefers-color-scheme: dark) { .sub, .note { color: #a8a29e; } .note { border-left-color: #44403c; } code { background: #1c1917; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>ICSAC Editorial System</h1>
+  <p class="sub">Open-source AI editorial pipeline for the Institute for Complexity Science and Advanced Computing.</p>
+
+  <nav class="nav">
+    <a href="./tree/main">Source (Files)</a>
+    <a href="./blob/main/README.md">README</a>
+    <a href="./blob/main/rubrics/">Rubrics</a>
+    <a href="https://icsacinstitute.org">icsacinstitute.org</a>
+    <a href="https://icsacinstitute.org/submit">/submit</a>
+  </nav>
+
+  <p>This Space hosts the canonical source of the system that receives, reviews, and adjudicates every paper submitted to ICSAC and its journal <em>Persistence</em>. The submission handler, the rubrics, the prompts, the citation checks, the redaction layer, the audit pass that scores the panel itself &mdash; nothing about how submissions are evaluated is hidden, with one defensive exception (the prompt-injection signal in the RQC audit is unpublished).</p>
+
+  <h2>Why this is public</h2>
+  <p>Independent and heterodox researchers have legitimate cause to be skeptical of black-box editorial AI. The reasonable response is not to hide the system behind a "trust us"; the reasonable response is to publish it. Open the <a href="./blob/main/README.md">README</a> for the full overview, or browse the source via the <a href="./tree/main">Files</a> tab above.</p>
+
+  <h2>License &amp; provenance</h2>
+  <p>MIT-licensed. Maintained by ICSAC, Fort Wayne IN. See <a href="./blob/main/LICENSE">LICENSE</a> and <a href="./blob/main/README.md">README.md</a> for citation guidance.</p>
+
+  <p class="note">A GitHub mirror at <code>github.com/ICSAC/editorial-system</code> is currently inaccessible pending account review. This Hugging Face Space is the live source until that clears; both will remain in sync thereafter.</p>
+</main>
+</body>
+</html>

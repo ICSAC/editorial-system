@@ -1,3 +1,14 @@
+---
+title: ICSAC Editorial System
+emoji: 📄
+colorFrom: indigo
+colorTo: gray
+sdk: static
+pinned: false
+license: mit
+short_description: Open-source AI editorial pipeline for ICSAC submissions
+---
+
 # ICSAC Editorial System
 
 This is the open-source AI editorial pipeline that accepts and reviews every
@@ -121,7 +132,7 @@ a Python subpackage at [`intake/`](intake/).
 | `email_send.py`, `email_render.py` | Author correspondence primitives |
 | `publications.py`, `publish_watcher.py` | Post-acceptance publication |
 | `watch.py` | Polls Zenodo for curator state transitions and posts branded comments on accept/decline |
-| `notify.py` | Curator-channel notification helpers (Telegram + ntfy in the institute deployment; forkable) |
+| `notify.py` | Curator-channel notification helpers (channel-agnostic dispatcher; forkable) |
 | `directory.py` | Community directory data layer |
 | `stats.py` | Aggregate statistics over historical reviews |
 | `rubrics/` | The editorial rubrics applied to every submission |

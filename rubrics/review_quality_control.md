@@ -2,7 +2,7 @@
 
 Review Quality Control (RQC) is an integrity audit of the panel's review output, not a re-review of the submission. It reads the complete multi-slot panel output for a single submission and scores each reviewer slot independently. Its purpose is to detect panel drift, justification/score mismatch, and prompt-injection subversion before the human accept/decline click.
 
-RQC is **flag-only**. It never gates acceptance. `review_quality_control_flag: true` surfaces to the curator's configured alert channel (ntfy + Telegram in our deployment) so the human curator can look before deciding. The watcher proceeds regardless.
+RQC is **flag-only**. It never gates acceptance. `review_quality_control_flag: true` surfaces to the curator's configured alert channel so the human curator can look before deciding. The watcher proceeds regardless.
 
 ## Two-tier output policy
 
