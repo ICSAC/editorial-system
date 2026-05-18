@@ -8,6 +8,15 @@ the curator confirms or overrides the panel's recommendation:
 Runs publications registration (DOI route only), Zenodo deposit staging
 (PDF route + deposit consent only), drafts the author email, appends
 audit-log, clears the awaiting-decision marker, finalises state.json.
+
+Test-tier routing (T2/T3): submissions whose sub_id matches
+ICSAC-SUB-TEST-<unix-ts> are looked up under ~/icsac-submissions/test/,
+their audit entries land in audit-log-test.jsonl, the email step takes
+the tier kwarg from submission.json (T2 -> outbox .eml, T3 -> Gmail
+draft with `[T3 TEST]` prefix), Zenodo staging passes sandbox=True for
+T3 and skips entirely for T2, and the curator-ready Telegram ping
+routes to TELEGRAM_TEST_CHAT_ID. Publications registration is skipped
+in test mode regardless of tier (no writes to icsacinstitute.org repo).
 """
 
 from __future__ import annotations
@@ -35,8 +44,11 @@ from . import submission_worker as worker  # local — reuse _scrubbed_report_pa
 
 
 SUBMISSIONS_ROOT = Path.home() / "icsac-submissions"
+TEST_SUBMISSIONS_ROOT = SUBMISSIONS_ROOT / "test"
 AUDIT_LOG = Path(config.REVIEWS_DIR) / "audit-log.jsonl"
-SUB_ID_RE = re.compile(r"^ICSAC-SUB-\d{5}$")
+TEST_AUDIT_LOG = Path(config.REVIEWS_DIR) / "audit-log-test.jsonl"
+SUB_ID_RE = re.compile(r"^ICSAC-SUB-(?:TEST-\d+|\d{5})$")
+TEST_SUB_ID_RE = re.compile(r"^ICSAC-SUB-TEST-\d+$")
 VERDICT_OK = {"accept", "revise", "scope_reject"}
 
 
@@ -46,10 +58,36 @@ def _now_iso() -> str:
     )
 
 
-def _audit(event: dict) -> None:
-    AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with AUDIT_LOG.open("a") as f:
-        f.write(json.dumps({"ts": _now_iso(), **event}) + "\n")
+def _audit(event: dict, *, test_mode: bool = False) -> None:
+    target = TEST_AUDIT_LOG if test_mode else AUDIT_LOG
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("a") as f:
+        payload = {"ts": _now_iso(), **event}
+        if test_mode:
+            payload.setdefault("test", True)
+        f.write(json.dumps(payload) + "\n")
+
+
+def _curator_routing(test_mode: bool, tier: int) -> dict:
+    """Return kwargs for notify.send_to_curator routing.
+
+    Production: empty dict (default chat, ntfy on). Test mode at T3:
+    route to TELEGRAM_TEST_CHAT_ID (if configured) and suppress ntfy
+    so test runs do not trip pain alerts. Test mode at T2: suppress
+    both curator pings (skip Telegram too) since T2 stays IMAP-less.
+    """
+    if not test_mode:
+        return {}
+    if tier == 3:
+        chat = getattr(config, "TELEGRAM_TEST_CHAT_ID", "")
+        thread = getattr(config, "TELEGRAM_TEST_THREAD_ID", "")
+        if not chat:
+            # No test chat configured; suppress entirely.
+            return {"chat_override": "__suppress__", "ntfy": False}
+        return {"chat_override": chat, "thread_override": thread,
+                "ntfy": False}
+    # T2 (or T1 dry-run): no curator ping.
+    return {"chat_override": "__suppress__", "ntfy": False}
 
 
 def main(argv: list[str]) -> int:
@@ -69,18 +107,30 @@ def main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
 
-    sub_dir = SUBMISSIONS_ROOT / sub_id
+    is_test = bool(TEST_SUB_ID_RE.match(sub_id))
+    sub_root = TEST_SUBMISSIONS_ROOT if is_test else SUBMISSIONS_ROOT
+    sub_dir = sub_root / sub_id
     if not sub_dir.is_dir():
         print(f"no such submission: {sub_dir}", file=sys.stderr)
         return 1
 
     submission = json.loads((sub_dir / "submission.json").read_text())
+    # tier is intake-asserted on the submission record; test_mode is
+    # the canonical isolation flag. Re-derive both from the sub_id
+    # prefix too as a belt-and-suspenders check against a forged
+    # record file.
+    tier = int(submission.get("tier") or 1)
+    test_mode = bool(submission.get("test_mode")) or is_test
+    if test_mode and tier == 1:
+        tier = 1  # T1 short-circuits earlier in the pipeline; we should
+                  # not see T1 records arrive here, but if one does treat
+                  # it as a no-side-effect dry run.
     form = submission.get("form", {})
     title = submission.get("title") or "Untitled"
     source = submission.get("source") or "upload"
     source_ref = submission.get("doi") or submission.get("source_ref") or ""
 
-    panel_md, rqc_md = worker._scrubbed_report_pair(sub_id, title)
+    panel_md, rqc_md = worker._scrubbed_report_pair(sub_id, title, tier=tier)
 
     state_path = sub_dir / "state.json"
     state_pre = json.loads(state_path.read_text()) if state_path.exists() else {}
@@ -91,11 +141,11 @@ def main(argv: list[str]) -> int:
     # submission_worker.process()). PDF-route accept defers to
     # publish_watcher after the curator publishes the draft.
     publications_url_str: str | None = None
-    if verdict == "accept" and source == "doi":
+    if verdict == "accept" and source == "doi" and not test_mode:
         try:
             publications_url_str = worker._register_doi_accept(sub_id, sub_dir, submission)
             _audit({"sub_id": sub_id, "event": "publications_registered",
-                    "publications_url": publications_url_str, "by": "curator"})
+                    "publications_url": publications_url_str, "by": "curator"}, test_mode=test_mode)
             print(f"  publications: registered at {publications_url_str}",
                   file=sys.stderr)
         except Exception as exc:
@@ -103,7 +153,7 @@ def main(argv: list[str]) -> int:
                   file=sys.stderr)
             _audit({"sub_id": sub_id, "event": "publications_register_failed",
                     "reason": f"{type(exc).__name__}: {exc}"[:500],
-                    "by": "curator"})
+                    "by": "curator"}, test_mode=test_mode)
             # Author email still sends — placeholder reads as empty string.
 
     # Curator-driven accept on the upload route stages a draft deposit
@@ -113,29 +163,34 @@ def main(argv: list[str]) -> int:
     # zenodo_deposit.publish_draft). Failure is graceful — _pending
     # template either way. Mirrors submission_worker.process().
     deposit_record_id = state_pre.get("deposit_record_id")
+    skip_zenodo = test_mode and tier == 2
     if (verdict == "accept"
             and source == "upload"
             and not deposit_record_id
-            and form.get("deposit_consent")):
+            and form.get("deposit_consent")
+            and not skip_zenodo):
         try:
             import repository_deposit as zenodo_deposit
-            print(f"  deposit-draft: staging for {sub_id}...", file=sys.stderr)
+            sandbox = test_mode and tier == 3
+            label = "sandbox " if sandbox else ""
+            print(f"  deposit-draft: staging {label}for {sub_id}...", file=sys.stderr)
             paper_pdf = sub_dir / "paper.pdf"
             draft = zenodo_deposit.stage_deposit_draft(
                 submission, paper_pdf,
                 log=lambda m: print(m, file=sys.stderr),
+                sandbox=sandbox,
             )
             state_pre["deposit_record_id"] = draft["record_id"]
             state_pre["deposit_draft_url"] = draft["draft_url"]
             _audit({"sub_id": sub_id, "event": "deposit_draft_completed",
                     "deposit_record_id": draft["record_id"],
                     "deposit_draft_url": draft["draft_url"],
-                    "by": "curator"})
+                    "by": "curator"}, test_mode=test_mode)
         except Exception as exc:
             print(f"  deposit-draft failed for {sub_id}: {exc}", file=sys.stderr)
             _audit({"sub_id": sub_id, "event": "deposit_draft_failed",
                     "reason": f"{type(exc).__name__}: {exc}"[:500],
-                    "by": "curator"})
+                    "by": "curator"}, test_mode=test_mode)
             # deposit_doi stays None either way — template falls back to _pending.
 
     ok, info = notify_author.send_decision(
@@ -145,15 +200,18 @@ def main(argv: list[str]) -> int:
         panel_report_md=panel_md, rqc_md=rqc_md,
         deposit_doi=deposit_doi, deposit_url=deposit_url,
         publications_url=publications_url_str,
+        tier=tier,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
         try:
+            curator_kwargs = _curator_routing(test_mode, tier)
             notify.send_to_curator(
                 f"*Draft ready*: `{sub_id}` — verdict *{verdict}* (curator)\n"
                 f"To: `{form['email']}`\n"
                 f"Open Gmail → Drafts to review and send.",
                 parse_mode="Markdown",
+                **curator_kwargs,
             )
         except Exception as exc:
             print(f"curator draft-ready ping failed: {exc}", file=sys.stderr)
@@ -176,7 +234,7 @@ def main(argv: list[str]) -> int:
         "sub_id": sub_id, "event": "decision_emailed",
         "verdict": verdict, "by": "curator", "note": note or None,
         "email_sent": ok,
-    })
+    }, test_mode=test_mode)
 
     # DOI lazy-rehydration: replace local paper.pdf with a stub now that
     # the review lifecycle is closed. Bytes remain retrievable from the
@@ -185,7 +243,7 @@ def main(argv: list[str]) -> int:
     # archive of record).
     if worker.stub_pdf_if_doi(sub_dir, submission):
         _audit({"sub_id": sub_id, "event": "pdf_stubbed",
-                "doi": submission.get("doi", ""), "by": "curator"})
+                "doi": submission.get("doi", ""), "by": "curator"}, test_mode=test_mode)
 
     notify.send_to_curator(
         f"ICSAC decision applied\n\n"
@@ -193,6 +251,7 @@ def main(argv: list[str]) -> int:
         f"Verdict: {verdict.upper()}\n"
         f"Author email: {'sent' if ok else 'FAILED — ' + str(info)[:120]}",
         parse_mode=None,
+        **_curator_routing(test_mode, tier),
     )
 
     print(f"applied {verdict} for {sub_id}; email_sent={ok}")

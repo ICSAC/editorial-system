@@ -404,7 +404,9 @@ def _write_incident_to_remote(incident: dict) -> bool:
 
 
 def _escalate_for_decision(sub_id: str, sub_dir: Path,
-                           review_data: dict, aggregate: dict) -> None:
+                           review_data: dict, aggregate: dict,
+                           *, chat_override: str | None = None,
+                           thread_override: str | None = None) -> None:
     """Open a conversation with the curator via the configured reply
     channel and hand off the incident to the incident-router so the
     curator's reply can drive `decide.sh <verdict>`.
@@ -449,7 +451,9 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
         f"(Reply on the curator's configured reply channel; "
         f"or 'park' to shelve until later.)"
     )
-    msg_id = notify.send_telegram(initial_msg, parse_mode=None)
+    msg_id = notify.send_telegram(initial_msg, parse_mode=None,
+                                  chat_override=chat_override,
+                                  thread_override=thread_override)
     bot_msg_ids = []
     if isinstance(msg_id, int):
         bot_msg_ids.append(msg_id)
@@ -846,7 +850,32 @@ def process(sub_id: str) -> None:
                  pending_recommendation=rec)
 
     if test_mode:
-        _log(f"  T{tier}: {rec} — escalation skipped on test path")
+        # T3 with TELEGRAM_TEST_CHAT_ID configured: fire the curator
+        # escalation to the test chat so the full T3 spec
+        # (worker-side Telegram + apply_decision-side email draft +
+        # sandbox Zenodo) can be exercised end-to-end. T2 and
+        # T3-without-test-chat skip the escalation entirely.
+        if tier == 3 and getattr(config, "TELEGRAM_TEST_CHAT_ID", ""):
+            test_chat = config.TELEGRAM_TEST_CHAT_ID
+            test_thread = getattr(config, "TELEGRAM_TEST_THREAD_ID", "")
+            _escalate_for_decision(sub_id, sub_dir, review_data, aggregate,
+                                   chat_override=test_chat,
+                                   thread_override=test_thread)
+            notify.send_to_curator(
+                f"{sub_id}: {rec} — awaiting curator verdict (T3 TEST)",
+                parse_mode=None,
+                chat_override=test_chat,
+                thread_override=test_thread,
+                ntfy=False,
+            )
+            _log(f"  T3: {rec} — escalated to test chat {test_chat}")
+            _a({"sub_id": sub_id, "event": "awaiting_decision_test_escalated",
+                "tier": 3, "recommendation": rec})
+            return
+        if tier == 3:
+            _log(f"  T3: {rec} — TELEGRAM_TEST_CHAT_ID unset, escalation skipped")
+        else:
+            _log(f"  T{tier}: {rec} — escalation skipped on test path")
         _a({"sub_id": sub_id, "event": "awaiting_decision_skipped_test_mode",
             "recommendation": rec})
         return
