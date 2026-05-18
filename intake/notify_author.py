@@ -168,6 +168,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   deposit_url: str | None = None,
                   publications_url: str | None = None,
                   tier: int = 1,
+                  compaction_manifest: dict | None = None,
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -205,6 +206,43 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         }.get((verdict, source))
     if not template:
         raise ValueError(f"unknown (verdict, source): {verdict!r}, {source!r}")
+    import review_compaction
+    if compaction_manifest is None:
+        compaction_manifest = {"_failure": "no manifest provided to send_decision"}
+    failure = compaction_manifest.get("_failure")
+    if failure:
+        disclosure = (
+            "ICSAC normally runs every submission through an automated "
+            "blind-review preprocessor that strips author identifiers, "
+            "affiliations, contact information, acknowledgments, funding "
+            "statements, and the references list before the panel reads "
+            "the manuscript. For your submission this preprocessing did "
+            f"not run ({failure}); the panel reviewed your manuscript "
+            "as submitted. If you believe the unredacted form influenced "
+            "the decision in a way you want to contest, contact "
+            "help@icsacinstitute.org and reference your submission ID."
+        )
+    else:
+        manifest_lines = review_compaction.render_manifest(compaction_manifest)
+        disclosure = (
+            "Before our AI panel reviewed your manuscript, the editorial "
+            "system automatically removed author names, affiliations, "
+            "contact information, ORCID iDs, acknowledgments, funding "
+            "statements, and the references list (inline citation markers "
+            "were preserved). This is a standard double-blind preprocessing "
+            "step intended to reduce author-identity bias, lower token "
+            "consumption, and add a privacy layer between authors and the "
+            "models in the panel. Citation verification was performed "
+            "separately against your full reference list upstream of the "
+            "panel.\n\n"
+            "If you believe this preprocessing affected the decision in a "
+            "way you want to contest, contact help@icsacinstitute.org and "
+            "reference your submission ID.\n\n"
+            "The following content was removed from your manuscript "
+            "before review:\n\n"
+            f"{manifest_lines}"
+        )
+
     subject, body = _render(template, {
         "icsac_submission_id": sub_id,
         "title": title, "author_name": author_name,
@@ -212,6 +250,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "deposit_doi": deposit_doi or "",
         "deposit_url": deposit_url or "",
         "publications_url": publications_url or "",
+        "compaction_disclosure": disclosure,
     })
 
     attachments: list[tuple[str, bytes]] = []

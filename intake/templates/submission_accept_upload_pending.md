@@ -17,6 +17,10 @@ Two PDFs are attached:
 
 The institute will follow up shortly with the assigned DOI for your manuscript and the link to its public ICSAC indexing record at [icsacinstitute.org/publications](https://icsacinstitute.org/publications). No action is required from you in the interim.
 
+## About this review
+
+{{compaction_disclosure}}
+
 — ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

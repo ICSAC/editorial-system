@@ -796,6 +796,31 @@ def process(sub_id: str) -> None:
     rec = aggregate.get("recommendation", "REVIEW_FURTHER")
     _log(f"  Recommendation: {rec}")
 
+    # Persist the blind-review compaction manifest so apply_decision can
+    # render the disclosure block in the author's decision email and the
+    # audit trail records exactly what gemini stripped. review.review_paper
+    # attaches it to aggregate unconditionally (including PAUSED_AI_FAILURE
+    # paths) so this branch is the single place that touches disk.
+    compaction_manifest = aggregate.get("compaction_manifest")
+    if compaction_manifest is not None:
+        (sub_dir / "compaction_manifest.json").write_text(
+            json.dumps(compaction_manifest, indent=2) + "\n"
+        )
+        _a({
+            "sub_id": sub_id,
+            "event": "compaction_applied",
+            "reduction_pct": compaction_manifest.get("reduction_pct"),
+            "failure": compaction_manifest.get("_failure"),
+            "removed_counts": {
+                "authors": len(compaction_manifest.get("author_names", [])),
+                "affiliations": len(compaction_manifest.get("affiliations", [])),
+                "emails": len(compaction_manifest.get("emails", [])),
+                "orcids": len(compaction_manifest.get("orcids", [])),
+                "references": compaction_manifest.get("references_count", 0),
+                "funding": len(compaction_manifest.get("funding_statements", [])),
+            },
+        })
+
     rqc_path = Path(config.REVIEWS_DIR) / f"{sub_id}_review_quality_control.md"
     rqc_flag = None
     if rqc_path.exists():

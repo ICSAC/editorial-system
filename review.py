@@ -281,7 +281,7 @@ def run_claude_review(prompt: str, capture_path: str = None) -> dict:
                 input=prompt,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=1200,
                 env=_sandboxed_env(),
             )
             if result.returncode == 0:
@@ -302,14 +302,27 @@ def run_claude_review(prompt: str, capture_path: str = None) -> dict:
 
 
 def run_gemini_review(prompt: str, capture_path: str = None) -> dict:
-    """Run review via gemini CLI."""
+    """Run review via gemini CLI (subscription-backed, no API spend).
+
+    Used as the tail-of-chain fallback for panel slots whose external
+    routes (HF Groq, HF Cerebras, OR free) all 413/429 on oversized
+    prompts. Gemini 2.5 Pro handles 1M-token context so there is no
+    per-request size wall, and the subscription quota covers the
+    institute's submission volume comfortably.
+
+    GEMINI_CLI_TRUST_WORKSPACE bypasses the trusted-folders gate so
+    headless subprocess invocations work; without it the CLI rejects
+    every call with an ANSI-coloured trust warning to stderr.
+    """
+    env = {**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"}
     try:
         result = subprocess.run(
             [config.GEMINI_CMD, "-p", "Respond with JSON only. No markdown fencing."],
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=1200,
+            env=env,
         )
         _write_raw(capture_path, result.stdout, result.stderr)
         return parse_review_output(result.stdout, "gemini")
@@ -577,6 +590,21 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
                 return result
             # Same forensic stderr line for HF entries.
             print(f"      panel-chain hf {model} → {result.get('error', '')[:200]}",
+                  file=_sys.stderr)
+            last_error = result
+        elif kind == "gemini":
+            # Subscription-backed tail-of-chain. Flush any pending OR
+            # batch first (same ordering rule as HF entries), then call
+            # gemini-cli. The `model` field on a gemini entry is unused
+            # today (the CLI picks its default model); reserved for
+            # future per-slot rotation across gemini variants.
+            success = _flush_or()
+            if success:
+                return success
+            result = run_gemini_review(prompt, capture_path=capture_path)
+            if "error" not in result:
+                return result
+            print(f"      panel-chain gemini → {result.get('error', '')[:200]}",
                   file=_sys.stderr)
             last_error = result
         else:
@@ -1358,12 +1386,63 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     fails that threshold aborts the run with PAUSED_AI_FAILURE (no point
     burning compute on remaining passes if the panel is unstable).
 
+    Blind-review compaction (review_compaction.compact_paper) strips
+    author identifiers, affiliations, acknowledgments, funding statements,
+    and the references list AFTER citation_verify has run against the
+    original text. The panel sees only the redacted manuscript with a
+    short notice header explaining what was removed. The manifest of
+    removed content is attached to the returned aggregate so the worker
+    can persist it (compaction_manifest.json) and the decision email can
+    disclose exactly what was stripped to the author.
+
     Returns (markdown, aggregate). Aggregate shape matches compute_aggregate
-    for N=1 plus extra fields (pass_aggregates, dimension_stdev, passes)
-    for N>=2.
+    for N=1 plus extra fields (pass_aggregates, dimension_stdev, passes,
+    compaction_manifest) for N>=2.
     """
     verification_report = _run_citation_verify(review_data)
-    prompt = build_prompt(review_data, verification_report=verification_report)
+
+    # Blind-review preprocessing. citation_verify above used the full
+    # original text (refs visible). From here on the panel only sees the
+    # redacted version. See review_compaction.py for methodology framing.
+    import review_compaction
+    original_text = review_data.get("full_text", "")
+    redacted_text, compaction_manifest = review_compaction.compact_paper(
+        original_text,
+        log=lambda m: print(m, file=__import__("sys").stderr),
+    )
+    if compaction_manifest.get("_failure"):
+        print(
+            f"  compaction: skipped ({compaction_manifest['_failure']}); "
+            f"panel will see un-stripped paper",
+            file=__import__("sys").stderr,
+        )
+    else:
+        pct = compaction_manifest.get("reduction_pct", 0)
+        print(
+            f"  compaction: applied ({compaction_manifest.get('original_chars', 0)} -> "
+            f"{compaction_manifest.get('redacted_chars', 0)} chars, {pct}% reduction)",
+            file=__import__("sys").stderr,
+        )
+
+    # Build the panel-facing review_data view: redacted text + blinded
+    # creators in the SUBMISSION metadata block. The original review_data
+    # is left untouched (worker still needs the real creators for audit
+    # and the apply_decision email path).
+    compacted_data = dict(review_data)
+    if compaction_manifest.get("_failure"):
+        # On failure, keep original text but still blind the creators
+        # metadata so the panel does not see author names in the prompt
+        # header even when compaction itself failed.
+        pass
+    else:
+        compacted_data["full_text"] = (
+            review_compaction.panel_notice() + redacted_text
+        )
+    compacted_data["creators"] = [
+        {"name": "[author identity withheld for blind review]"}
+    ]
+
+    prompt = build_prompt(compacted_data, verification_report=verification_report)
 
     slots = [None] + list(getattr(config, "OPENROUTER_MODELS", []))
     n_slots = len(slots)
@@ -1396,6 +1475,7 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
             markdown = generate_review_markdown(review_data, pass_results, aggregate)
             path = save_review(review_data, markdown)
             print(f"  PAUSED — review saved with PAUSED_AI_FAILURE marker: {path}")
+            aggregate["compaction_manifest"] = compaction_manifest
             return markdown, aggregate
 
     print(f"  Aggregating across {n_passes} pass(es)...")
@@ -1411,4 +1491,5 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     except Exception as e:
         print(f"  RQC audit failed (non-fatal): {e}")
 
+    aggregate["compaction_manifest"] = compaction_manifest
     return markdown, aggregate

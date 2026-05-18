@@ -87,6 +87,7 @@ OPENROUTER_MODELS = [
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
         "or|openai/gpt-oss-120b:free",
         "or|z-ai/glm-4.5-air:free",
+        "gemini",
     ],
     # Slot 2: Groq gpt-oss-120b → Cerebras Qwen3-235B → OR Nvidia/Hermes.
     # nemotron-3-super-120b-a12b excluded (won't emit JSON reliably).
@@ -95,6 +96,7 @@ OPENROUTER_MODELS = [
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
         "or|nvidia/nemotron-nano-12b-v2-vl:free",
         "or|nousresearch/hermes-3-llama-3.1-405b:free",
+        "gemini",
     ],
     # Slot 3: Cerebras primary → Groq Llama → OR Google/cross-family.
     [
@@ -102,6 +104,7 @@ OPENROUTER_MODELS = [
         "hf|meta-llama/Llama-3.3-70B-Instruct:groq",
         "or|google/gemma-4-26b-a4b-it:free",
         "or|z-ai/glm-4.5-air:free",
+        "gemini",
     ],
     # Slot 4: HF Groq primary, HF Cerebras fallback, OR tail. Reordered
     # 2026-04-27 after qwen3-next-80b-a3b-instruct:free failed all 4
@@ -119,6 +122,7 @@ OPENROUTER_MODELS = [
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
         "or|minimax/minimax-m2.5:free",
         "or|google/gemma-4-31b-it:free",
+        "gemini",
     ],
 ]
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
