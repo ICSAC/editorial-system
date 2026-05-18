@@ -193,6 +193,18 @@ def main(argv: list[str]) -> int:
                     "by": "curator"}, test_mode=test_mode)
             # deposit_doi stays None either way — template falls back to _pending.
 
+    # Load the blind-review compaction manifest (worker persisted it
+    # alongside the submission). Missing manifest = compaction did not run
+    # for this submission (older sub, or worker crash before write); the
+    # disclosure block prints a graceful fallback in that case.
+    compaction_manifest = None
+    manifest_path = sub_dir / "compaction_manifest.json"
+    if manifest_path.exists():
+        try:
+            compaction_manifest = json.loads(manifest_path.read_text())
+        except Exception as exc:
+            print(f"  manifest load failed: {exc}", file=sys.stderr)
+
     ok, info = notify_author.send_decision(
         to=form["email"], sub_id=sub_id, title=title,
         author_name=form["name"], verdict=verdict,
@@ -201,6 +213,7 @@ def main(argv: list[str]) -> int:
         deposit_doi=deposit_doi, deposit_url=deposit_url,
         publications_url=publications_url_str,
         tier=tier,
+        compaction_manifest=compaction_manifest,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).

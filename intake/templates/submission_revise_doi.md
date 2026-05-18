@@ -23,6 +23,10 @@ Resubmissions are evaluated by a fresh panel run; reviewer identities are not pr
 
 There is no limit on the number of revise-and-resubmit rounds. ICSAC does not charge submission, review, or article-processing fees at any stage.
 
+## About this review
+
+{{compaction_disclosure}}
+
 — ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)
