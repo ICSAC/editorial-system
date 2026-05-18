@@ -43,6 +43,14 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # with other operator monitoring without crossing streams.
 TELEGRAM_THREAD_ID = os.environ.get("TELEGRAM_THREAD_ID", "")
 
+# Optional: Tier-3 test routing. The submission worker (when test_mode and
+# tier=3) and apply_decision (when applying a verdict to a test sub_id)
+# route curator-facing Telegram to this chat instead of TELEGRAM_CHAT_ID.
+# Leave unset to skip the curator Telegram in T3 entirely (panel/RQC/email
+# draft still run); the worker logs a single warning when this happens.
+TELEGRAM_TEST_CHAT_ID = os.environ.get("TELEGRAM_TEST_CHAT_ID", "")
+TELEGRAM_TEST_THREAD_ID = os.environ.get("TELEGRAM_TEST_THREAD_ID", "")
+
 # Optional: IMAP draft-save mode. When email_send is invoked with draft=True,
 # the rendered MIME message is APPENDed to Gmail's Drafts folder via IMAP
 # (operator manually reviews + sends from Gmail UI). Leave unset to disable

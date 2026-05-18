@@ -19,7 +19,8 @@ import config
 
 
 def send_telegram(message: str, parse_mode: str | None = "Markdown",
-                  chat_override: str | None = None) -> int | None:
+                  chat_override: str | None = None,
+                  thread_override: str | None = None) -> int | None:
     """Send a message via Telegram bot API. Pass parse_mode=None to send as plain text.
 
     Returns the Telegram message_id on success (an int), None on failure.
@@ -41,6 +42,8 @@ def send_telegram(message: str, parse_mode: str | None = "Markdown",
     unchanged so a test chat that lives in the same supergroup can still
     pin to its own topic.
     """
+    if (chat_override or "") == "__suppress__":
+        return None
     if not config.TELEGRAM_TOKEN or not config.TELEGRAM_CHAT_ID:
         return None
     url = f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/sendMessage"
@@ -51,7 +54,7 @@ def send_telegram(message: str, parse_mode: str | None = "Markdown",
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    thread_id = getattr(config, "TELEGRAM_THREAD_ID", "")
+    thread_id = (thread_override or "").strip() or getattr(config, "TELEGRAM_THREAD_ID", "")
     if thread_id:
         try:
             payload["message_thread_id"] = int(thread_id)
@@ -79,24 +82,34 @@ def send_telegram(message: str, parse_mode: str | None = "Markdown",
         return None
 
 
-def send_to_curator(message: str, parse_mode: str | None = "Markdown") -> bool:
+def send_to_curator(message: str, parse_mode: str | None = "Markdown",
+                    chat_override: str | None = None,
+                    thread_override: str | None = None,
+                    ntfy: bool = True) -> bool:
     """Dispatch a curator-facing alert to the operator's configured channels.
 
     In the institute's deployment this fans out to Telegram + ntfy. Forks
     that wire other channels (Slack, Matrix, email, webhook) should swap
     this function's body; the workflow only calls send_to_curator and
     does not assume which channels are live.
+
+    Test-tier routing: pass chat_override (and optionally thread_override)
+    to redirect Telegram to a separate test chat/topic. Pass ntfy=False to
+    skip the ntfy backup so test runs don't fire pain alerts.
     """
-    tg_ok = bool(send_telegram(message, parse_mode=parse_mode))
+    tg_ok = bool(send_telegram(message, parse_mode=parse_mode,
+                               chat_override=chat_override,
+                               thread_override=thread_override))
     # ntfy doesn't render markdown; strip the formatting for the backup
     # channel. The Telegram message_id from send_telegram is the
     # caller-relevant return value for conversation-thread tracking,
     # but send_to_curator is for one-shot alerts that don't need it.
-    try:
-        plain = re.sub(r"[*_`]", "", message)
-        send_ntfy(plain, title="ICSAC")
-    except Exception:
-        pass
+    if ntfy:
+        try:
+            plain = re.sub(r"[*_`]", "", message)
+            send_ntfy(plain, title="ICSAC")
+        except Exception:
+            pass
     return tg_ok
 
 
