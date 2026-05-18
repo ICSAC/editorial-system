@@ -23,6 +23,10 @@ If you believe this scope determination is in error, reply to this message with 
 
 ICSAC does not charge submission, review, or article-processing fees.
 
+## About this review
+
+{{compaction_disclosure}}
+
 — ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)
