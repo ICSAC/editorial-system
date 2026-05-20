@@ -69,8 +69,17 @@ def check_model_availability(timeout: int = 15) -> dict:
 
     Returns a structured dict so both the CLI (refresh-models) and the batch
     tick scheduler can share one implementation. A slot is 'dead' when
-    EVERY entry in its fallback chain is missing from the live catalog —
-    OpenRouter's intra-slot fallback cannot rescue a fully-missing chain.
+    EVERY entry in its fallback chain is unreachable.
+
+    Chain entries are backend-tagged (matching review._run_panel_chain):
+      "or|<model>" / bare  → OpenRouter; validated against the live :free
+                             catalog (the only backend this catalog covers).
+      "hf|<model>:<prov>"  → HF Router (Groq/Cerebras) — not in OR's catalog,
+                             so it can't be disproven here; treated reachable.
+      "gemini"             → subscription gemini-cli; always reachable.
+    The pre-2026-05-16 version compared raw prefixed strings against the
+    unprefixed OR catalog, so every tagged entry mismatched and all slots
+    read 'dead' — falsely skipping reviews on every tick.
 
     Errors fetching the catalog surface as fetched=False; batch-tick treats
     this the same as a dead slot (can't confirm reachability → skip reviews).
@@ -95,11 +104,23 @@ def check_model_availability(timeout: int = 15) -> dict:
     free_ids = {m["id"] for m in free}
     free.sort(key=lambda m: -m.get("context_length", 0))
 
+    def _entry_reachable(entry):
+        # Mirror review._run_panel_chain's parsing: bare entries are OR.
+        if entry == "gemini":
+            return True
+        kind, sep, model = entry.partition("|")
+        if not sep:
+            kind, model = "or", entry
+        if kind == "or":
+            return model in free_ids
+        # hf| (Groq/Cerebras via HF Router) — not verifiable from OR catalog.
+        return True
+
     slots_info = []
     for i, slot in enumerate(getattr(config, "OPENROUTER_MODELS", []), 1):
         chain = list(slot) if isinstance(slot, list) else [slot]
-        reachable = [m for m in chain if m in free_ids]
-        missing = [m for m in chain if m not in free_ids]
+        reachable = [m for m in chain if _entry_reachable(m)]
+        missing = [m for m in chain if not _entry_reachable(m)]
         slots_info.append({
             "index": i,
             "chain": chain,
