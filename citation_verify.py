@@ -403,6 +403,61 @@ def _search_semanticscholar(query: str, year: int | None = None) -> dict | None:
     }
 
 
+_RAW_TITLE_RE = re.compile(
+    r"\(\s*(?P<year>\d{4})[a-z]?\s*\)\.\s*(?P<title>[^.]+?)\.\s+(?:[A-Z][a-z]|\d)",
+    re.S,
+)
+
+
+def _parse_title_from_raw(raw: str) -> str:
+    """Conservative regex lift of the title from a raw citation string like
+    'Landauer, R. (1961). Irreversibility and Heat Generation... IBM J...'.
+
+    Used only when the extractor left ``title`` empty. Returns "" if the
+    pattern doesn't cleanly match; never invents data.
+    """
+    if not raw:
+        return ""
+    m = _RAW_TITLE_RE.search(raw)
+    if not m:
+        return ""
+    title = m.group("title").strip()
+    # reject candidates that look like author lists or are too short to be a title
+    if len(title) < 12 or title.count(",") > 3:
+        return ""
+    return title
+
+
+def _search_crossref_bibliographic(raw: str, year: int | None = None) -> dict | None:
+    """Crossref bibliographic-query resolver — feeds the raw citation string
+    AS-IS to /works?query.bibliographic=. Catches the class of refs the
+    extractor couldn't structure (no ``doi``/``arxiv_id``/``title``) but still
+    have the raw citation intact. Returns the top candidate in verifier shape,
+    or None on miss / network error.
+    """
+    try:
+        results = submission_intake.search_crossref_bibliographic(raw, rows=5)
+    except Exception:
+        return None
+    if not results:
+        return None
+    if year:
+        with_year = [r for r in results if r.get("year") and abs(int(r["year"]) - int(year)) <= 1]
+        if with_year:
+            results = with_year
+    top = results[0]
+    if not top.get("title") or not top.get("doi"):
+        return None
+    return {
+        "resolver": "crossref",
+        "resolved_id": top.get("doi"),
+        "title": top.get("title", ""),
+        "abstract": top.get("abstract") or "",
+        "year": top.get("year"),
+        "authors": top.get("authors") or [],
+    }
+
+
 def _normalize_for_match(s: str) -> str:
     """Canonicalize a string for fuzzy comparison."""
     if not s:
@@ -468,6 +523,15 @@ def verify_citation(c: dict) -> dict:
         "confidence": "unverifiable",
         "reason": "",
     }
+
+    # Repair: if the extractor left `title` empty but the raw citation
+    # string is intact, lift the title from raw so the catalog searches
+    # below have something to query with. Mutates a local copy only.
+    if not c.get("title") and c.get("raw"):
+        parsed = _parse_title_from_raw(c["raw"])
+        if parsed:
+            c = dict(c)
+            c["title"] = parsed
 
     # 1. arXiv exact-id
     if c.get("arxiv_id"):
@@ -597,6 +661,37 @@ def verify_citation(c: dict) -> dict:
             # Title-only with no year → not enough to call verified.
             out["reason"] = (
                 "Semantic Scholar returned a candidate but title + author + year did not co-confirm."
+            )
+            return out
+
+    # 5. Crossref bibliographic-query — feeds the raw citation string AS-IS.
+    #    Catches refs with no DOI/arXiv/title in the structured fields but a
+    #    valid raw citation (the dominant failure mode for journal classics
+    #    like Landauer/Shannon/Tononi/Friston that the extractor under-structures).
+    if c.get("raw") and len(c["raw"]) >= 20:
+        r = _search_crossref_bibliographic(c["raw"], year=c.get("year"))
+        if r:
+            title_ok = _title_matches(c.get("title"), r["title"]) if c.get("title") else False
+            authors_ok = _author_overlap(c.get("authors") or [], r.get("authors") or [])
+            year_ok = (
+                c.get("year") and r.get("year")
+                and abs(int(c["year"]) - int(r["year"])) <= 1
+            )
+            if (title_ok and authors_ok) or (title_ok and year_ok) or (authors_ok and year_ok):
+                conf = "title-author-match" if (title_ok and authors_ok) else "title-only-match"
+                out.update({
+                    "verified": True,
+                    "resolver": r["resolver"],
+                    "resolved_id": r["resolved_id"],
+                    "title": r["title"],
+                    "abstract": r["abstract"],
+                    "confidence": conf,
+                    "reason": "Crossref bibliographic-query matched on raw citation string.",
+                })
+                return out
+            out["reason"] = (
+                "Crossref bibliographic-query returned a candidate but "
+                "title + author + year did not co-confirm."
             )
             return out
 
