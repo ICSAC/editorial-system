@@ -427,6 +427,69 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
     }
 
 
+def search_crossref_bibliographic(query: str, rows: int = 5) -> list[dict]:
+    """Crossref REST: GET /works?query.bibliographic=<query>
+
+    Feed the raw citation string AS-IS — e.g. "Landauer, R. (1961).
+    Irreversibility and Heat Generation in the Computing Process. IBM J.
+    Res. Dev. 5(3), 183-191." Crossref indexes the whole reference and
+    returns ranked candidate works (DOI + title + authors + year).
+
+    Returns up to ``rows`` candidate dicts in the same shape as
+    fetch_crossref_metadata, with an extra ``score`` field (Crossref relevance
+    score). Returns [] on miss / network error / very short query.
+    """
+    if not query or len(query.strip()) < 20:
+        return []
+    safe = urllib.parse.quote_plus(query.strip())
+    url = f"https://api.crossref.org/works?query.bibliographic={safe}&rows={rows}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "ICSAC-pipeline/1.0 (mailto:info@icsacinstitute.org)",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=CITATION_HTTP_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return []
+    items = (data.get("message") or {}).get("items") or []
+    out = []
+    for msg in items:
+        title_list = msg.get("title") or []
+        title = title_list[0].strip() if title_list else ""
+        if not title:
+            continue
+        abstract = msg.get("abstract") or ""
+        if abstract:
+            abstract = re.sub(r"<[^>]+>", "", abstract).strip()
+        authors = []
+        for a in msg.get("author", []) or []:
+            family = (a.get("family") or "").strip()
+            given = (a.get("given") or "").strip()
+            full = (f"{given} {family}").strip() or family or given
+            if full:
+                authors.append(full)
+        year = None
+        issued = msg.get("issued") or msg.get("published-print") or msg.get("published-online")
+        if issued and isinstance(issued.get("date-parts"), list) and issued["date-parts"]:
+            first = issued["date-parts"][0]
+            if first and isinstance(first[0], int):
+                year = first[0]
+        out.append({
+            "doi": (msg.get("DOI") or "").lower(),
+            "title": title,
+            "authors": authors,
+            "abstract": abstract,
+            "year": year,
+            "type": msg.get("type", ""),
+            "score": msg.get("score", 0.0),
+        })
+    return out
+
+
 def search_semanticscholar(query: str) -> list[dict]:
     """Semantic Scholar Graph API search.
 
