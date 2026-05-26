@@ -76,7 +76,8 @@ def check_model_availability(timeout: int = 15) -> dict:
                              catalog (the only backend this catalog covers).
       "hf|<model>:<prov>"  → HF Router (Groq/Cerebras) — not in OR's catalog,
                              so it can't be disproven here; treated reachable.
-      "gemini"             → subscription gemini-cli; always reachable.
+    (The "gemini" gemini-cli entry was retired 2026-05-22 ahead of the
+    gemini-cli sunset; no slot ships a bare "gemini" anymore.)
     The pre-2026-05-16 version compared raw prefixed strings against the
     unprefixed OR catalog, so every tagged entry mismatched and all slots
     read 'dead' — falsely skipping reviews on every tick.
@@ -106,8 +107,9 @@ def check_model_availability(timeout: int = 15) -> dict:
 
     def _entry_reachable(entry):
         # Mirror review._run_panel_chain's parsing: bare entries are OR.
-        if entry == "gemini":
-            return True
+        # (The "gemini" gemini-cli special case was retired 2026-05-22; a
+        # stray "gemini" entry now parses as an OR model id and reads as
+        # unreachable, matching the panel chain's post-retirement behavior.)
         kind, sep, model = entry.partition("|")
         if not sep:
             kind, model = "or", entry
