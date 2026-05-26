@@ -1,4 +1,10 @@
-"""Multi-model reviewer panel engine using CLI-based AI tooling (claude -p, gemini)."""
+"""Multi-model reviewer panel engine (claude -p, OpenRouter, HF Router).
+
+The gemini-cli tail-of-chain panelist was retired 2026-05-22 ahead of the
+gemini-cli free-tier sunset (2026-06-18); the Gemini-family voice is now an
+OpenRouter google/gemma :free entry. `run_gemini_review` below is retained
+as dead code only for fork compatibility — no live code path calls it.
+"""
 
 import json
 import os
@@ -302,7 +308,13 @@ def run_claude_review(prompt: str, capture_path: str = None) -> dict:
 
 
 def run_gemini_review(prompt: str, capture_path: str = None) -> dict:
-    """Run review via gemini CLI (subscription-backed, no API spend).
+    """DEPRECATED / DEAD CODE (2026-05-22). No live caller — the gemini-cli
+    panelist was retired ahead of the 2026-06-18 free-tier sunset and
+    _run_panel_chain no longer dispatches to it. Retained only so external
+    forks importing this symbol don't break. Will fail at runtime once the
+    gemini binary is gone; do not re-wire it.
+
+    Run review via gemini CLI (subscription-backed, no API spend).
 
     Used as the tail-of-chain fallback for panel slots whose external
     routes (HF Groq, HF Cerebras, OR free) all 413/429 on oversized
@@ -577,6 +589,11 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
         return None
 
     for entry in chain:
+        # Backend tag parsing. "hf|<model>:<prov>" → HF Router; everything
+        # else (including legacy untagged entries) → OpenRouter. The bare
+        # "gemini" gemini-cli tail-of-chain was retired 2026-05-22 ahead of
+        # the gemini-cli sunset; the panel's Gemini-family voice is now an
+        # OpenRouter google/gemma :free entry, dispatched like any "or|".
         kind, sep, model = entry.partition("|")
         if not sep:
             kind, model = "or", entry  # legacy bare entry → OR
@@ -1378,6 +1395,32 @@ def _append_citation_verify_audit(record_id: str, citations: list[dict], error) 
         pass
 
 
+def _fire_compaction_pain(review_data: dict, reason: str) -> None:
+    """Fire a pain signal when blind-review compaction fails closed.
+
+    Direct ntfy /pain POST so a curator investigates the withheld paper.
+    Best-effort, never raises — the fail-closed PAUSE has already protected
+    author identity by the time this is called; the alert is observability.
+    """
+    url = getattr(config, "NTFY_PAIN_URL", "")
+    if not url:
+        return
+    import urllib.request
+    rec_id = review_data.get("record_id", "?")
+    title = review_data.get("title", "Untitled")
+    body = (
+        f"Blind-review compaction FAILED for {rec_id} ({title}): {reason}. "
+        f"Paper withheld from the panel (fail-closed) and submission PAUSED. "
+        f"Curator must investigate before any review can proceed."
+    )
+    try:
+        req = urllib.request.Request(url, data=body.encode())
+        req.add_header("Title", "ICSAC compaction failure — paper withheld")
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        pass
+
+
 def review_paper(review_data: dict) -> tuple[str, dict]:
     """Run full multi-model review with self-heal + multi-pass aggregation.
 
@@ -1411,33 +1454,55 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
         log=lambda m: print(m, file=__import__("sys").stderr),
     )
     if compaction_manifest.get("_failure"):
+        # FAIL CLOSED. Blind-review compaction failed, so the manuscript
+        # still carries author identifiers. Letting it reach the panel
+        # would leak author identity into a supposedly blind review — the
+        # exact integrity violation compaction exists to prevent. Withhold
+        # the paper, fire a pain signal for a curator, and return a PAUSED
+        # aggregate (the worker routes this to paused_panel_failure).
+        reason = compaction_manifest["_failure"]
         print(
-            f"  compaction: skipped ({compaction_manifest['_failure']}); "
-            f"panel will see un-stripped paper",
-            file=__import__("sys").stderr,
+            f"  compaction: FAILED ({reason}); paper WITHHELD from panel "
+            f"(fail-closed — author identity protected)",
+            file=sys.stderr,
         )
-    else:
-        pct = compaction_manifest.get("reduction_pct", 0)
-        print(
-            f"  compaction: applied ({compaction_manifest.get('original_chars', 0)} -> "
-            f"{compaction_manifest.get('redacted_chars', 0)} chars, {pct}% reduction)",
-            file=__import__("sys").stderr,
-        )
+        _fire_compaction_pain(review_data, reason)
+        aggregate = {
+            "recommendation": "PAUSED_AI_FAILURE",
+            "models_used": [],
+            "failed_models": [],
+            "reason": (
+                f"Blind-review compaction failed ({reason}); manuscript "
+                f"withheld from the panel to prevent author-identity leakage"
+            ),
+            "disagreement": False,
+            "dimension_scores": {},
+            "pass_aggregates": [],
+            "dimension_stdev": {},
+            "passes": 0,
+            "compaction_manifest": compaction_manifest,
+        }
+        markdown = generate_review_markdown(review_data, [], aggregate)
+        path = save_review(review_data, markdown)
+        print(f"  PAUSED — compaction failed, review withheld: {path}")
+        return markdown, aggregate
+
+    pct = compaction_manifest.get("reduction_pct", 0)
+    print(
+        f"  compaction: applied ({compaction_manifest.get('original_chars', 0)} -> "
+        f"{compaction_manifest.get('redacted_chars', 0)} chars, {pct}% reduction)",
+        file=sys.stderr,
+    )
 
     # Build the panel-facing review_data view: redacted text + blinded
     # creators in the SUBMISSION metadata block. The original review_data
     # is left untouched (worker still needs the real creators for audit
-    # and the apply_decision email path).
+    # and the apply_decision email path). Reached only on compaction
+    # success — the failure path above already returned.
     compacted_data = dict(review_data)
-    if compaction_manifest.get("_failure"):
-        # On failure, keep original text but still blind the creators
-        # metadata so the panel does not see author names in the prompt
-        # header even when compaction itself failed.
-        pass
-    else:
-        compacted_data["full_text"] = (
-            review_compaction.panel_notice() + redacted_text
-        )
+    compacted_data["full_text"] = (
+        review_compaction.panel_notice() + redacted_text
+    )
     compacted_data["creators"] = [
         {"name": "[author identity withheld for blind review]"}
     ]
