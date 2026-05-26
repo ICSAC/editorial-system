@@ -16,25 +16,31 @@ Two intentions, one mechanism:
      Trimming them lets larger manuscripts fit the panel's per-route
      context budgets.
 
-Implementation strategy (extract-not-echo, 2026-05-18 refactor):
+Implementation strategy (extract-not-echo, 2026-05-18 refactor; repointed
+from gemini-cli to `claude -p` 2026-05-22 ahead of the gemini-cli sunset):
 
-  Gemini is asked to IDENTIFY spans to remove (short snippets, section
+  The model is asked to IDENTIFY spans to remove (short snippets, section
   start/end anchors) — never to echo the redacted manuscript back. Python
   performs the actual removal via string operations against the original
-  text. This keeps gemini's output small (a few KB regardless of paper
+  text. This keeps the model's output small (a few KB regardless of paper
   size) and avoids the output-truncation / content-filter trips that hit
   large-paper echo-style runs (see the DET-paper failure mode at 28K
-  tokens: gemini's invalid-content retry exhaustion mid-echo).
+  tokens: invalid-content retry exhaustion mid-echo).
 
-  Tradeoff: if gemini returns a snippet that doesn't string-match in the
+  Tradeoff: if the model returns a snippet that doesn't string-match in the
   original (whitespace drift, hyphenation, OCR artifacts), that category
   silently does not redact. Logged in the manifest as a `match_failures`
   list so curators can spot egregious cases.
 
-Returns (redacted_text, manifest_dict). On gemini failure or empty extract
-output, returns (original_text, {"_failure": "<reason>"}) — the worker
-treats that as a non-fatal warning and proceeds with the un-stripped
-paper. A failed compaction never blocks a real submission.
+Returns (redacted_text, manifest_dict).
+
+FAIL CLOSED (2026-05-22): on ANY compaction failure (model timeout,
+exception, non-zero exit, unparseable output, empty input) this returns
+("", {"_failure": "<reason>"}) — an EMPTY redacted text, never the
+original. Author identity must never reach the blind panel. The caller
+(review.review_paper) detects the "_failure" key, withholds the paper from
+the panel, fires a pain signal, and pauses the submission for a curator.
+A failed compaction blocks the paper rather than leaking identity.
 """
 
 from __future__ import annotations
@@ -133,32 +139,32 @@ _EMPTY_MANIFEST = {
 }
 
 
-def _gemini_call(prompt_input: str, *, timeout_sec: int = 600) -> tuple[str, str, int]:
-    """Invoke gemini-cli, returning (stdout, stderr, returncode).
+def _claude_call(manuscript: str, *, timeout_sec: int = 600) -> tuple[str, str, int]:
+    """Invoke `claude -p`, returning (stdout, stderr, returncode).
 
-    Sets GEMINI_CLI_TRUST_WORKSPACE so headless invocations don't trip the
-    trusted-folders gate. Uses EXTRACT_PROMPT as -p; passes the manuscript
-    on stdin.
+    `claude -p` reads its prompt from stdin, so EXTRACT_PROMPT and the
+    manuscript are concatenated (prompt first, blank line, then manuscript)
+    and fed via input=. EXTRACT_PROMPT is deliberately NOT passed as a
+    positional arg. Claude returns the same JSON manifest schema the rest of
+    this module expects (_extract_json parses it).
     """
-    env = {**os.environ, "GEMINI_CLI_TRUST_WORKSPACE": "true"}
     proc = subprocess.run(
-        [config.GEMINI_CMD, "-p", EXTRACT_PROMPT],
-        input=prompt_input,
+        [config.CLAUDE_CMD, "-p"],
+        input=EXTRACT_PROMPT + "\n\n" + manuscript,
         capture_output=True,
         text=True,
         timeout=timeout_sec,
-        env=env,
     )
     return proc.stdout, proc.stderr, proc.returncode
 
 
 def _extract_json(raw: str) -> dict | None:
-    """Pull a single JSON object out of gemini's stdout.
+    """Pull a single JSON object out of the model's stdout.
 
-    gemini-cli prepends warning lines on first use (256-color, ripgrep
-    missing, etc.). We tolerate those — find the first '{' and parse from
-    there. If the output is wrapped in ```json ... ``` despite the prompt
-    asking otherwise, strip those fences first.
+    The CLI may prepend incidental lines before the JSON. We tolerate
+    those — find the first '{' and parse from there. If the output is
+    wrapped in ```json ... ``` despite the prompt asking otherwise, strip
+    those fences first.
     """
     text = raw.strip()
     if text.startswith("```"):
@@ -317,10 +323,12 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
 def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
     """Strip author/identifier metadata from a manuscript for blind review.
 
-    Returns (redacted_text, manifest). On any failure path the original
-    text is returned with a manifest carrying a "_failure" reason — the
-    caller treats that as a non-fatal warning and proceeds with the
-    un-stripped paper. Compaction MUST NEVER block a submission.
+    Returns (redacted_text, manifest). FAIL CLOSED: on any failure path the
+    redacted text is the EMPTY STRING (never the original) and the manifest
+    carries a "_failure" reason. The caller (review.review_paper) must treat
+    a "_failure" manifest as a hard stop — withhold the paper from the panel
+    and pause the submission — so author identity can never leak into a
+    "blind" review. Compaction failure BLOCKS the paper.
     """
     def _log(msg: str) -> None:
         if log:
@@ -331,37 +339,38 @@ def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
     if not paper_text or not paper_text.strip():
         manifest = dict(_EMPTY_MANIFEST)
         manifest["_failure"] = "empty input"
-        return paper_text, manifest
+        return "", manifest
 
     try:
-        stdout, stderr, rc = _gemini_call(paper_text)
+        stdout, stderr, rc = _claude_call(paper_text)
     except subprocess.TimeoutExpired:
-        _log("  compaction: gemini timed out; proceeding with un-stripped paper")
+        _log("  compaction: claude timed out; FAILING CLOSED (paper withheld from panel)")
         manifest = dict(_EMPTY_MANIFEST)
-        manifest["_failure"] = "gemini timeout"
-        return paper_text, manifest
+        manifest["_failure"] = "claude timeout"
+        return "", manifest
     except Exception as exc:
-        _log(f"  compaction: gemini call raised {type(exc).__name__}: {exc}")
+        _log(f"  compaction: claude call raised {type(exc).__name__}: {exc}; "
+             f"FAILING CLOSED (paper withheld from panel)")
         manifest = dict(_EMPTY_MANIFEST)
-        manifest["_failure"] = f"gemini exception: {type(exc).__name__}"
-        return paper_text, manifest
+        manifest["_failure"] = f"claude exception: {type(exc).__name__}"
+        return "", manifest
 
     if rc != 0:
-        # Gemini-cli failed but we may still have partial output. Surface
-        # the rc so curators can investigate; treat as a failure.
+        # claude -p failed. Surface the rc so curators can investigate;
+        # treat as a hard failure (fail closed).
         snippet = (stderr or "")[:240].replace("\n", " ")
-        _log(f"  compaction: gemini exited {rc}; stderr: {snippet}")
+        _log(f"  compaction: claude exited {rc}; stderr: {snippet}; FAILING CLOSED")
         manifest = dict(_EMPTY_MANIFEST)
-        manifest["_failure"] = f"gemini exit {rc}"
-        return paper_text, manifest
+        manifest["_failure"] = f"claude exit {rc}"
+        return "", manifest
 
     spans = _extract_json(stdout)
     if spans is None:
-        _log(f"  compaction: gemini output not parseable as JSON "
-             f"({len(stdout)} chars stdout)")
+        _log(f"  compaction: claude output not parseable as JSON "
+             f"({len(stdout)} chars stdout); FAILING CLOSED")
         manifest = dict(_EMPTY_MANIFEST)
-        manifest["_failure"] = "gemini output unparseable"
-        return paper_text, manifest
+        manifest["_failure"] = "claude output unparseable"
+        return "", manifest
 
     redacted, manifest, match_failures = _apply_removals(paper_text, spans)
 
@@ -386,7 +395,9 @@ def render_manifest(manifest: dict) -> str:
     """Render a manifest dict as a plain-text bulleted list for the
     decision email's compaction disclosure block."""
     if manifest.get("_failure"):
-        return f"(Compaction not applied: {manifest['_failure']}. The panel reviewed the un-stripped manuscript.)"
+        return (f"(Compaction failed: {manifest['_failure']}. The manuscript was "
+                f"WITHHELD from the panel to prevent author-identity leakage; "
+                f"the submission was paused for curator review.)")
 
     lines = []
     if manifest.get("author_names"):
