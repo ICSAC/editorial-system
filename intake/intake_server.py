@@ -49,6 +49,7 @@ import notify  # noqa: E402
 
 from . import notify_author  # local
 from .time_fmt import to_et_display  # local
+from .sponsor_logo import handle_sponsor_logo, prefill_for_session  # local
 
 
 SUBMISSIONS_ROOT = Path.home() / "icsac-submissions"
@@ -1292,6 +1293,46 @@ def api_submission_state(sub_id: str):
         "test_mode": bool(data.get("test_mode", False)),
         "tier": data.get("tier") if data.get("test_mode") else None,
     }
+
+
+@app.post("/api/sponsor-logo")
+async def api_sponsor_logo(request: Request):
+    # Mirror /api/submit body+HMAC pattern. We read the bytes once for
+    # HMAC verification, then let Starlette re-parse the same buffered
+    # body as multipart via request.form().
+    raw_body = await request.body()
+    if len(raw_body) > 6 * 1024 * 1024:
+        raise HTTPException(413, 'sponsor-logo body too large')
+    _verify_hmac(request, raw_body)
+
+    form = await request.form()
+    session_id = (form.get("session_id") or "").strip() if isinstance(form.get("session_id"), str) else ""
+    logo = form.get("logo")
+    # Starlette's form parser returns starlette.datastructures.UploadFile;
+    # fastapi.UploadFile is a SUBCLASS, so isinstance against the fastapi
+    # one returns False on real uploads. Check the starlette parent class.
+    from starlette.datastructures import UploadFile as _StarletteUploadFile
+    if not isinstance(logo, _StarletteUploadFile):
+        raise HTTPException(400, 'missing logo file')
+    form_display = form.get("display_name")
+    form_url = form.get("website_url")
+    form_display_s = form_display.strip() if isinstance(form_display, str) else ""
+    form_url_s = form_url.strip() if isinstance(form_url, str) else ""
+    return await handle_sponsor_logo(
+        request, session_id, logo, raw_body,
+        form_display_name=form_display_s,
+        form_website_url=form_url_s,
+    )
+
+
+@app.get("/api/sponsor-prefill")
+async def api_sponsor_prefill(request: Request):
+    # Read-only prefill — returns display_name + website_url for a paid
+    # Sponsor session. No HMAC: the data echoed is data the caller
+    # already entered at checkout, and a valid session_id is its own
+    # auth (long random opaque string).
+    session_id = (request.query_params.get("session_id") or "").strip()
+    return prefill_for_session(session_id)
 
 
 @app.exception_handler(HTTPException)
