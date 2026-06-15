@@ -216,4 +216,4 @@ ICSAC operates on bootstrap funding and private donations. Open peer review for
 independent and heterodox researchers is the kind of infrastructure no one is
 paid to build. If you want to help keep it running:
 
-**[manifund.org/projects/icsac-ai-assisted-peer-review-for-independent-researchers](https://manifund.org/projects/icsac-ai-assisted-peer-review-for-independent-researchers)**
+**[icsacinstitute.org/community/donate](https://icsacinstitute.org/community/donate)**
