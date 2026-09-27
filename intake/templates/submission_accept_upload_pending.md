@@ -25,11 +25,17 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 
 - You keep the copyright. The paper is published under the licence you chose, **{{license_name}}**; the institute holds a non-exclusive licence to publish it. You may post or republish your PDF anywhere.
 - If selected for *Persistence*, the paper appears there under the same licence. *Persistence* is sold as a paperback and ebook; authors pay nothing and are paid nothing.
-- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters and print materials, at no cost to you. If you would rather it not be promoted, reply and say so; we will exclude it.
+- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the *Persistence* volume, on your response page or by reply.
 - You will be listed as **{{author_display}}**{{affiliation_line}}.
 - We take it that this paper has no other DOI and is not under review elsewhere, as confirmed at submission.
 
-If any of this is wrong, or you wish to withdraw the paper, reply to this email before the DOI is registered; after registration the record is permanent and changes are made by published correction.
+## Your response
+
+Open your personal link to approve publication. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the *Persistence* volume — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
+
+**{{approval_url}}**
+
+If we have not heard from you by **{{objection_deadline}}**, we proceed with publication. After the DOI is registered the record is permanent and changes are made by published correction. Replying to this email works too.
 
 ## About this review
 

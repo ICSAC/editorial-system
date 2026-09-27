@@ -415,6 +415,14 @@ def main():
         _sys.argv = ["watch"] + (["--skip-reviews"] if skip_reviews else [])
         rc = watch.main()
 
+        print("[3a] Author objection windows...")
+        try:
+            from intake import author_approval
+            _closed = author_approval.check_windows()
+            print(f"  author windows closed in silence and pinged: {_closed}")
+        except Exception as e:
+            print(f"  author window check crashed (non-fatal): {e}")
+
         print("[3/4] Polling staged Zenodo drafts for publish transitions...")
         try:
             publish_summary = publish_watcher.poll_drafts()

@@ -310,6 +310,19 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # The author's personal response link + the objection window. T2 has no
+    # external surface, so no window; T3 gets one (the page shows the TEST banner).
+    approval_url, objection_deadline = "", ""
+    if verdict == "accept" and source == "upload" and not (test_mode and tier == 2):
+        try:
+            from . import author_approval
+            ap = author_approval.issue(sub_dir)
+            approval_url, objection_deadline = ap["url"], ap["deadline_display"]
+            _audit({"sub_id": sub_id, "event": "author_window_opened",
+                    "deadline": ap["deadline"], "by": "curator"}, test_mode=test_mode)
+        except Exception as exc:
+            print(f"  author approval window failed to open: {exc}", file=sys.stderr)
+
     # Attribution exactly as the deposits will carry it, so the author can object
     # before the DOI is permanent.
     author_display, affiliation, license_name = "", "", ""
@@ -339,6 +352,7 @@ def main(argv: list[str]) -> int:
         decided_date=decided_date, citation_line=citation_line,
         author_display=author_display, affiliation=affiliation, license_name=license_name,
         terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
+        approval_url=approval_url, objection_deadline=objection_deadline,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
