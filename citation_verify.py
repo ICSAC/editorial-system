@@ -132,6 +132,7 @@ def _run_claude_extract(prompt: str, timeout: int = 240) -> str:
     """
     result = subprocess.run(
         [config.CLAUDE_CMD, "-p",
+         "--model", "sonnet",
          "--tools", "",
          "--setting-sources", ""],
         input=prompt,
