@@ -326,7 +326,11 @@ def _validate_submitter(d: dict) -> dict:
     email = (d.get("email") or "").strip().lower()
     orcid = (d.get("orcid") or "").strip()
     coi = str(d.get("coi") or "").lower() in ("on", "true", "1", "yes")
+    # The form posts `exclusivity_acknowledged`; this read `exclusivity` and so
+    # recorded None for every upload. Accept both.
     exclusivity_raw = d.get("exclusivity")
+    if exclusivity_raw is None:
+        exclusivity_raw = d.get("exclusivity_acknowledged")
     if exclusivity_raw is None:
         exclusivity = None
     else:
@@ -838,6 +842,7 @@ async def handle_test_pipeline_submission(
         "abstract": abstract,
         "keywords": keywords,
         "license": license_id,
+        "terms_version": getattr(config, "TERMS_VERSION", ""),
         "creators": creators,
         "publication_date": publication_date,
         "resource_type": resource_type,
@@ -874,6 +879,7 @@ async def handle_test_pipeline_submission(
         "source_ref": source_ref,
         "title": title[:200],
         "license": license_id,
+        "terms_version": getattr(config, "TERMS_VERSION", ""),
         "pdf_sha256": pdf_sha,
         "pdf_size_bytes": pdf_size,
         "auth_orcid": token,
@@ -1185,6 +1191,7 @@ async def api_submit(request: Request):
         "abstract": abstract,
         "keywords": keywords,
         "license": license_id,
+        "terms_version": getattr(config, "TERMS_VERSION", ""),
         "creators": creators,
         "publication_date": publication_date,
         "resource_type": resource_type,
@@ -1214,6 +1221,7 @@ async def api_submit(request: Request):
         "source_ref": source_ref,
         "title": title[:200],
         "license": license_id,
+        "terms_version": getattr(config, "TERMS_VERSION", ""),
         "pdf_sha256": pdf_sha,
         "pdf_size_bytes": pdf_size,
         "auth_orcid": auth_orcid or None,
@@ -1333,6 +1341,27 @@ async def api_sponsor_prefill(request: Request):
     # auth (long random opaque string).
     session_id = (request.query_params.get("session_id") or "").strip()
     return prefill_for_session(session_id)
+
+
+@app.get("/api/ebook-verify")
+async def api_ebook_verify(request: Request):
+    # Read-only: confirm a Checkout Session is a paid ebook purchase. Called by
+    # the CF /api/ebook-download proxy. A valid session_id is its own auth.
+    from . import ebook  # local, additive
+    session_id = (request.query_params.get("session_id") or "").strip()
+    status, body = ebook.verify_ebook_session(session_id)
+    return JSONResponse(body, status_code=status)
+
+
+@app.post("/api/ebook-webhook")
+async def api_ebook_webhook(request: Request):
+    # Stripe checkout.session.completed -> email the buyer their download link.
+    # Authenticated by the Stripe webhook signature inside handle_ebook_webhook.
+    from . import ebook  # local, additive
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    status, body = ebook.handle_ebook_webhook(payload, sig)
+    return JSONResponse(body, status_code=status)
 
 
 @app.exception_handler(HTTPException)
