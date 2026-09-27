@@ -74,8 +74,16 @@ def check_model_availability(timeout: int = 15) -> dict:
     Chain entries are backend-tagged (matching review._run_panel_chain):
       "or|<model>" / bare  → OpenRouter; validated against the live :free
                              catalog (the only backend this catalog covers).
-      "hf|<model>:<prov>"  → HF Router (Groq/Cerebras) — not in OR's catalog,
-                             so it can't be disproven here; treated reachable.
+      "hf|<model>:<prov>"  → HF Router; validated against HF's live catalog
+                             (router.huggingface.co/v1/models): the model must
+                             list <prov> as a live provider. Until 2026-09-27
+                             these were treated reachable without a check, so
+                             two retired pins (Groq Llama-3.3 404, Cerebras
+                             Qwen3 410) went unseen until a submission paused.
+                             If the HF catalog can't be fetched, hf entries are
+                             treated reachable (can't disprove) and hf_fetched
+                             is False. The catalog can't see account-level
+                             provider settings or per-minute token caps.
     (The "gemini" gemini-cli entry was retired 2026-05-22 ahead of the
     gemini-cli sunset; no slot ships a bare "gemini" anymore.)
     The pre-2026-05-16 version compared raw prefixed strings against the
@@ -105,6 +113,21 @@ def check_model_availability(timeout: int = 15) -> dict:
     free_ids = {m["id"] for m in free}
     free.sort(key=lambda m: -m.get("context_length", 0))
 
+    hf_url = getattr(config, "HF_MODELS_API_URL",
+                     "https://router.huggingface.co/v1/models")
+    hf_live = set()
+    hf_fetched = False
+    try:
+        with urllib.request.urlopen(hf_url, timeout=timeout) as resp:
+            hf_data = _json.loads(resp.read().decode())
+        for m in hf_data.get("data", []):
+            for pv in m.get("providers", []):
+                if pv.get("status", "live") == "live":
+                    hf_live.add((m.get("id", ""), pv.get("provider", "")))
+        hf_fetched = True
+    except Exception:
+        pass
+
     def _entry_reachable(entry):
         # Mirror review._run_panel_chain's parsing: bare entries are OR.
         # (The "gemini" gemini-cli special case was retired 2026-05-22; a
@@ -115,8 +138,12 @@ def check_model_availability(timeout: int = 15) -> dict:
             kind, model = "or", entry
         if kind == "or":
             return model in free_ids
-        # hf| (Groq/Cerebras via HF Router) — not verifiable from OR catalog.
-        return True
+        if kind == "hf":
+            if not hf_fetched:
+                return True  # can't disprove; hf_fetched=False tells the caller
+            mid, _, prov = model.rpartition(":")
+            return (mid, prov) in hf_live
+        return False
 
     slots_info = []
     for i, slot in enumerate(getattr(config, "OPENROUTER_MODELS", []), 1):
@@ -133,9 +160,14 @@ def check_model_availability(timeout: int = 15) -> dict:
 
     return {
         "fetched": True,
+        "hf_fetched": hf_fetched,
         "free_models": free,
         "slots": slots_info,
         "any_slot_dead": any(s["dead"] for s in slots_info),
+        # Every unreachable entry, dead slot or not. A slot with a dead PRIMARY
+        # and a live :free tail is not dead, but it is degraded -- and that is
+        # exactly the state the panel sat in for weeks before 2026-09-27.
+        "missing_entries": [m for s in slots_info for m in s["missing"]],
     }
 
 
@@ -276,7 +308,7 @@ def main():
                           "invite = resend invite only"))
     em.add_argument("doi", help="Zenodo DOI of the paper")
     em.add_argument("to", help="Recipient email address")
-    em.add_argument("--send", action="store_true", help="Actually send (default: dry-run preview)")
+    em.add_argument("--send", action="store_true", help="Put the email in Gmail Drafts for the curator to send (default: dry-run preview). Nothing is ever sent by code.")
 
     args = parser.parse_args()
 
@@ -324,7 +356,7 @@ def main():
         for slot in result["slots"]:
             print(f"  Slot {slot['index']}: {' -> '.join(slot['chain'])}")
             for m in slot["chain"]:
-                marker = "OK" if m in slot["reachable"] else "MISSING from free list"
+                marker = "OK" if m in slot["reachable"] else "MISSING (not in OR free list / not served by pinned HF provider)"
                 print(f"           {m}: {marker}")
             if slot["dead"]:
                 print(f"           !! SLOT {slot['index']} IS DEAD (every fallback missing)")
@@ -352,6 +384,20 @@ def main():
                 skip_reviews = True
             else:
                 print(f"  all {len(mod['slots'])} OR slots have >=1 reachable model")
+            # Degraded-but-alive: a retired primary with a live tail. Not a skip
+            # (the tail still reviews), but pain, so it surfaces before a
+            # submission pauses on a rate-limited tail.
+            if mod.get("missing_entries"):
+                miss = mod["missing_entries"]
+                print(f"  {len(miss)} chain entr{'y' if len(miss) == 1 else 'ies'} unreachable: {miss}")
+                fire_pain(
+                    "ICSAC panel: chain entries unreachable",
+                    f"{len(miss)} configured panel entr{'y' if len(miss) == 1 else 'ies'} "
+                    f"not served (retired model/provider?): {', '.join(miss)}. "
+                    f"Slots still alive via fallbacks; fix config.OPENROUTER_MODELS.",
+                )
+            if not mod.get("hf_fetched", True):
+                print("  HF catalog fetch failed; hf| entries unverified this tick")
 
         if skip_reviews:
             dead_slots = [s["index"] for s in mod.get("slots", []) if s["dead"]]
@@ -433,7 +479,7 @@ def main():
                            email_send.send_accept_email)
             if not ok1:
                 if not args.send:
-                    print("\n(dry-run; pass --send to actually deliver)")
+                    print("\n(dry-run; pass --send to draft into Gmail)")
                 sys.exit(1)
             if args.send:
                 time.sleep(5)
@@ -441,7 +487,7 @@ def main():
                            email_render.render_community_invite_email(review_data),
                            email_send.send_invite_email)
             if not args.send:
-                print("\n(dry-run; pass --send to actually deliver both)")
+                print("\n(dry-run; pass --send to draft both into Gmail)")
             sys.exit(0 if (ok1 and ok2) else 1)
         elif args.kind == "revise-and-resubmit":
             ok = _deliver("REVISE-AND-RESUBMIT EMAIL",
@@ -456,7 +502,7 @@ def main():
                           email_render.render_community_invite_email(review_data),
                           email_send.send_invite_email)
         if not args.send:
-            print("\n(dry-run; pass --send to actually deliver)")
+            print("\n(dry-run; pass --send to draft into Gmail)")
         sys.exit(0 if ok else 1)
 
     elif args.command == "watch-tick":

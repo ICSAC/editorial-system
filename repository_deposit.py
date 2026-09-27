@@ -84,7 +84,8 @@ def _request_json(method: str, url: str, *, token: str,
         raise DepositFailed(f"Zenodo {method} {url} -> {type(e).__name__}: {e}") from e
 
 
-def _build_metadata(submission: dict) -> dict:
+def _build_metadata(submission: dict, *, external_doi: str | None = None,
+                    publisher: str | None = None) -> dict:
     """Translate submission.json into a Zenodo deposit metadata dict.
 
     Form-captured fields map straight through; resource_type splits into
@@ -112,7 +113,25 @@ def _build_metadata(submission: dict) -> dict:
         if isinstance(c, str):
             creators.append({"name": c})
             continue
-        entry: dict[str, Any] = {"name": c.get("name", "").strip()}
+        # Zenodo's canonical creator form is "Family, Given". Authors type names
+        # every which way ("[author] [author]"); normalise once so the archive,
+        # the Crossref record and the landing page agree on how they are named.
+        raw_name = (c.get("name") or "").strip()
+        if not raw_name:
+            # A creator record without a name (seen on the T3 smoke fixture,
+            # 2026-09-27): fall back to the verified submitter rather than
+            # shipping an empty creator that Zenodo would reject at publish.
+            raw_name = ((submission.get("auth") or {}).get("name_on_record")
+                        or (submission.get("form") or {}).get("name") or "").strip()
+        try:
+            from crossref_deposit import split_name as _split
+            _g, _s = _split(raw_name)
+            _norm = f"{_s}, {_g}".strip(", ") if _s else raw_name
+        except Exception:
+            _norm = raw_name
+        if not _norm:
+            raise DepositFailed("creator has no name and no submitter name to fall back on")
+        entry: dict[str, Any] = {"name": _norm}
         if c.get("orcid"):
             entry["orcid"] = c["orcid"]
         if c.get("affiliation"):
@@ -141,6 +160,17 @@ def _build_metadata(submission: dict) -> dict:
         # community is the contract.
         "communities": [{"identifier": config.COMMUNITY_ID}],
     }
+    if external_doi:
+        # An externally registered DOI (ICSAC's Crossref prefix, 10.67697).
+        # Zenodo records it as provider "external" and mints nothing --
+        # verified on the sandbox 2026-09-27. The record becomes the
+        # archival copy; the DOI resolves to icsacinstitute.org.
+        metadata["doi"] = external_doi
+    if publisher:
+        # Surfaces as metadata.publisher on the record and in DataCite. Every
+        # ICSAC record before 2026-09-27 reads publisher = "Zenodo" because
+        # this was never set.
+        metadata["imprint_publisher"] = publisher
     if publication_type:
         metadata["publication_type"] = publication_type
     if keywords:
@@ -164,7 +194,8 @@ def _build_metadata(submission: dict) -> dict:
 
 
 def stage_deposit_draft(submission: dict, paper_pdf_path: Path,
-                         *, log=None, sandbox: bool = False) -> dict | None:
+                         *, log=None, sandbox: bool = False,
+                         external_doi: str | None = None) -> dict | None:
     """Stage a DRAFT Zenodo deposit for the submission. Does NOT publish.
 
     Returns {record_id, draft_url} on success; raises DepositFailed if
@@ -205,9 +236,13 @@ def stage_deposit_draft(submission: dict, paper_pdf_path: Path,
     if not paper_pdf_path.is_file():
         raise DepositFailed(f"paper.pdf missing at {paper_pdf_path}")
 
-    metadata = _build_metadata(submission)
+    metadata = _build_metadata(
+        submission, external_doi=external_doi,
+        publisher=getattr(config, "ZENODO_PUBLISHER_NAME",
+                          getattr(config, "CROSSREF_REGISTRANT", None)))
 
-    _info("  deposit-draft: creating empty deposition...")
+    _info("  deposit-draft: creating empty deposition..."
+          + (f" (external DOI {external_doi})" if external_doi else ""))
     created = _request_json("POST", f"{api}/deposit/depositions",
                              token=token, body={})
     deposit_id = created["id"]

@@ -26,3 +26,11 @@ reviews/*_citations.json
 reviews/*_citations.md
 audit-log*.jsonl
 test/_outbox/
+
+# 2026-09-27: never commit review artifacts -- raw panel reviews name models and carry author names;
+# audit logs carry author emails. The public mirror on HF re-publishes this repo.
+reviews/*
+!reviews/.gitkeep
+
+# editing backups
+*.bak-*
