@@ -116,7 +116,7 @@ def _sandboxed_env() -> dict:
 def _run_claude(prompt: str, timeout: int = 180) -> str:
     """Invoke claude -p with the same hardening as review.run_claude_review."""
     result = subprocess.run(
-        [config.CLAUDE_CMD, "-p", "--tools", "", "--setting-sources", ""],
+        [config.CLAUDE_CMD, "-p", "--model", "sonnet", "--tools", "", "--setting-sources", ""],
         input=prompt,
         capture_output=True,
         text=True,
@@ -224,20 +224,20 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
 
     prompt = MISATTRIBUTION_PROMPT_TEMPLATE.format(pairs_block=pairs_block)
 
-    # OpenRouter slot chain — qwen3-next-80b primary, glm-4.5-air
-    # cross-family fallback, gemma final. hy3-preview (a thinking-model
-    # variant) is intentionally NOT in this chain — it returns its
-    # answer in the `reasoning` field with chain-of-thought wrapping the
-    # JSON, which our parser handles defensively but produces noisy
-    # responses. Prefer instruction-tuned models that return clean JSON
-    # in `content`.
+    # 2026-09-27: every OR :free entry here was dead or rate-limited for weeks
+    # (qwen3-next-80b and glm-4.5-air are gone from OR's catalog; gemma 429s
+    # all day), so this check returned 0 verdicts on every submission and
+    # nothing said so. HF Router deepinfra first -- the provider the panel
+    # itself runs on since today -- with the two OR :free models that still
+    # exist as the tail. Same entry syntax as config.OPENROUTER_MODELS.
     chain = [
-        "qwen/qwen3-next-80b-a3b-instruct:free",
-        "z-ai/glm-4.5-air:free",
-        "google/gemma-4-31b-it:free",
+        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
+        "hf|deepseek-ai/DeepSeek-V4-Flash:deepinfra",
+        "or|google/gemma-4-31b-it:free",
+        "or|qwen/qwen3.8-27b:free",
     ]
 
-    raw = _call_openrouter(prompt, chain)
+    raw = _call_chain(prompt, chain)
     if not raw:
         return []
 
@@ -293,6 +293,93 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
             "resolved_id": c.get("resolved_id"),
         })
     return verdicts
+
+
+def _call_chain(prompt: str, chain: list[str]) -> str:
+    """Walk a mixed chain: `hf|<model>:<provider>` entries fire one HF Router
+    request each; consecutive `or|` / bare entries are batched into one OR
+    call (OR's own fallback handles the batch). First non-empty content wins."""
+    or_batch: list[str] = []
+
+    def _flush() -> str:
+        nonlocal or_batch
+        if not or_batch:
+            return ""
+        models, or_batch = or_batch, []
+        return _call_openrouter(prompt, models)
+
+    for entry in chain:
+        kind, sep, model = entry.partition("|")
+        if not sep:
+            kind, model = "or", entry
+        if kind == "hf":
+            out = _flush()
+            if out:
+                return out
+            out = _call_hf_router(prompt, model)
+            if out:
+                return out
+        else:
+            or_batch.append(model)
+    return _flush()
+
+
+def _call_hf_router(prompt: str, hf_model: str) -> str:
+    """Single HF Router request with an explicit provider pin (no failover
+    inside the call -- _call_chain moves on). Returns content or ""."""
+    import os
+    import urllib.request, urllib.error
+    api_key = getattr(config, "HF_TOKEN", "") or os.environ.get("HF_TOKEN", "")
+    if not api_key:
+        print("  misattribution: HF_TOKEN not set; skipping HF entry")
+        return ""
+    payload = {
+        "model": hf_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 3000,
+    }
+    req = urllib.request.Request(
+        "https://router.huggingface.co/v1/chat/completions",
+        data=json.dumps(payload).encode(),
+    )
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-Title", "ICSAC Citation Misattribution Check")
+    # HF's edge 403s the default urllib UA (see review.run_hf_router_review).
+    req.add_header("User-Agent", "icsac-editorial-system/1.0 (info@icsacinstitute.org)")
+
+    import concurrent.futures as _cf
+    HARD_HF_TIMEOUT = 240
+
+    def _do_call():
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return json.loads(resp.read().decode())
+
+    ex = _cf.ThreadPoolExecutor(max_workers=1)   # manual shutdown(wait=False): see _call_openrouter
+    try:
+        data = ex.submit(_do_call).result(timeout=HARD_HF_TIMEOUT)
+    except _cf.TimeoutError:
+        ex.shutdown(wait=False)
+        print(f"  misattribution: HF call exceeded {HARD_HF_TIMEOUT}s wall clock ({hf_model})")
+        return ""
+    except urllib.error.HTTPError as e:
+        ex.shutdown(wait=False)
+        print(f"  misattribution: HF HTTP {e.code} ({hf_model}): {e.read()[:200].decode(errors='replace')}")
+        return ""
+    except Exception as e:
+        ex.shutdown(wait=False)
+        print(f"  misattribution: HF call failed ({hf_model}): {e}")
+        return ""
+    ex.shutdown(wait=False)
+    if data.get("error"):
+        print(f"  misattribution: HF error ({hf_model}): {str(data['error'])[:200]}")
+        return ""
+    choices = data.get("choices") or []
+    content = ((choices[0].get("message") or {}).get("content") or "") if choices else ""
+    if content:
+        print(f"  misattribution: served by hf:{hf_model}")
+    return content
 
 
 def _call_openrouter(prompt: str, chain: list[str]) -> str:

@@ -90,8 +90,31 @@ def _list_awaiting_publish() -> list[Path]:
         except Exception:
             continue
         if state.get("deposit_record_id") and not state.get("deposit_doi"):
+            if state.get("crossref_doi") and not state.get("crossref_registered_at"):
+                # Crossref-path submission: register-doi.sh --live publishes the
+                # Zenodo draft itself, AFTER Crossref confirms the DOI. If the draft
+                # went live from the Zenodo UI first, its DOI resolves nowhere yet.
+                _crossref_path_early_publish_check(sub_dir, state)
+                continue
             out.append(sub_dir)
     return out
+
+
+def _crossref_path_early_publish_check(sub_dir: Path, state: dict) -> None:
+    try:
+        dep = _get_deposit(str(state["deposit_record_id"]))
+    except Exception:
+        return
+    if dep.get("submitted") or dep.get("state") == "done":
+        msg = (f"{sub_dir.name}: Zenodo record {state['deposit_record_id']} is PUBLISHED but its "
+               f"ICSAC DOI {state.get('crossref_doi')} is NOT registered at Crossref -- the DOI on "
+               f"the record resolves nowhere. Run intake/register-doi.sh {sub_dir.name} --live now.")
+        _fire_pain("ICSAC: Zenodo live before Crossref DOI", msg)
+        try:
+            import notify
+            notify.send_to_curator(msg, parse_mode=None)
+        except Exception:
+            pass
 
 
 def _bare_doi(s: str) -> str:
@@ -109,9 +132,13 @@ def _proto_authors_from_submission(submission: dict) -> list[str]:
             name = c.strip()
         else:
             name = ""
-        if "," in name:
-            last, after = [s.strip() for s in name.split(",", 1)]
-            name = f"{after} {last}".strip() if after else last
+        try:
+            from crossref_deposit import display_name
+            name = display_name(name) if name else name
+        except Exception:
+            if "," in name:
+                last, after = [s.strip() for s in name.split(",", 1)]
+                name = f"{after} {last}".strip() if after else last
         if name:
             out.append(name)
     if not out:

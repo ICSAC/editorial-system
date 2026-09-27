@@ -75,57 +75,120 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 # explicit provider pin does not auto-failover within the call — the panel
 # chain dispatcher is responsible for trying the next entry on failure.
 #
-# Cross-provider redundancy (2026-04-27): every slot's chain spans Groq +
-# Cerebras + OR-free so a single-provider outage can't take more than one
-# chain entry per slot. Cerebras free-tier 8K context cap forces
-# Qwen3-235B-A22B-Instruct-2507 (the 64K-context exempt model) anywhere
-# Cerebras appears in a slot.
+# 2026-09-27: Groq retired Llama-3.3-70B (404), Cerebras retired Qwen3-235B
+# (410), and Groq's free tier caps gpt-oss-120b at 8k tokens/min -- a paper is
+# ~10k tokens, so it 413s on every real submission. Every slot therefore fell
+# to its OR :free tail, which was rate-limited upstream (429), and a submission
+# paused twice. Primaries now pin deepinfra (paid from HF credits, ~1.5c per
+# paper at list price; all four verified 200 at full paper size 2026-09-27).
+# One model family per slot: DeepSeek / OpenAI open-weights / Qwen / Google.
+# Trade-off: one paid provider, so a deepinfra outage drops every slot to its
+# OR :free tail at once. No other provider is enabled on the HF account.
+# OR :free tails pruned 2026-09-27 to what OR's catalog lists (17 models):
+# gpt-oss-120b, glm-4.5-air, nemotron-nano-12b, hermes-3-405b and minimax-m2.5
+# :free are gone -- the new model check flagged them. Live cross-family picks
+# with paper-sized context: qwen3.8-27b (untested in the panel; last resort)
+# and the two gemma-4s. Slot 3's tail skips qwen since its primary is Qwen.
+# Second entry per slot (2026-09-27): a cross-family deepinfra fallback. A
+# reviewer output that fails the schema check is a MODEL-shaped failure; the
+# retry used to re-walk the same primary, then fall to the OR :free tail, which
+# 429'd all day -- two slots lost per pass, panel below MIN_REVIEWERS. A
+# different model on the same provider absorbs it. Same trade-off as 04-27:
+# a fallback can duplicate another slot's primary; reliability beats diversity.
 OPENROUTER_MODELS = [
-    # Slot 1: Groq Llama-3.3-70B → Cerebras Qwen3-235B → OR cross-family.
+    # Slot 1: DeepSeek family (was Llama-4-Scout until 2026-09-27: the RQC
+    # audit on a submission scored its specificity 1/5 in BOTH passes -- template
+    # justifications naming no section, figure or number -- so it was a
+    # reviewer in name only). No enabled provider serves Llama-3.3-70B any
+    # more. Fallback GLM-4.7-Flash keeps the slot cross-family.
     [
-        "hf|meta-llama/Llama-3.3-70B-Instruct:groq",
-        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
-        "or|openai/gpt-oss-120b:free",
-        "or|z-ai/glm-4.5-air:free",
-        "or|google/gemma-4-31b-it:free",
-    ],
-    # Slot 2: Groq gpt-oss-120b → Cerebras Qwen3-235B → OR Nvidia/Hermes.
-    # nemotron-3-super-120b-a12b excluded (won't emit JSON reliably).
-    [
-        "hf|openai/gpt-oss-120b:groq",
-        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
-        "or|nvidia/nemotron-nano-12b-v2-vl:free",
-        "or|nousresearch/hermes-3-llama-3.1-405b:free",
-        "or|google/gemma-4-31b-it:free",
-    ],
-    # Slot 3: Cerebras primary → Groq Llama → OR Google/cross-family.
-    [
-        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
-        "hf|meta-llama/Llama-3.3-70B-Instruct:groq",
-        "or|google/gemma-4-26b-a4b-it:free",
-        "or|z-ai/glm-4.5-air:free",
-        "or|google/gemma-4-31b-it:free",
-    ],
-    # Slot 4: HF Groq primary, HF Cerebras fallback, OR tail. Reordered
-    # 2026-04-27 after qwen3-next-80b-a3b-instruct:free failed all 4
-    # consecutive panel passes (SUB-00003 pass 0+1, SUB-00004 pass 0+1).
-    # Kept minimax + gemma-4-31b as the OR tail so slot 4 still has a
-    # full OR-only fallback path with model-family diversity from slots
-    # 1-3 OR tails (gpt-oss/z-ai, nemotron/hermes, gemma-4-26b/z-ai).
-    # NB: this puts slot 4 on the same primary (HF Groq llama-3.3) as
-    # slot 1 — accepted trade-off; total Groq-outage now drops the panel
-    # to 4/5 via Cerebras fallback rather than staying functional, but a
-    # CHRONIC slot-4 failure (which is what we had) was permanently below
-    # MIN_REVIEWERS=4 in pass 1. Reliability beats slot-level diversity.
-    [
-        "hf|meta-llama/Llama-3.3-70B-Instruct:groq",
-        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:cerebras",
-        "or|minimax/minimax-m2.5:free",
+        "hf|deepseek-ai/DeepSeek-V4-Flash:deepinfra",
+        "hf|zai-org/GLM-4.7-Flash:deepinfra",
+        "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-31b-it:free",
         "or|google/gemma-4-26b-a4b-it:free",
+    ],
+    # Slot 2: OpenAI open-weights. Same model as before, deepinfra instead of
+    # Groq. -> OR Nvidia/Hermes tail.
+    [
+        "hf|openai/gpt-oss-120b:deepinfra",
+        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
+        "or|google/gemma-4-31b-it:free",
+        "or|qwen/qwen3.8-27b:free",
+        "or|google/gemma-4-26b-a4b-it:free",
+    ],
+    # Slot 3: Qwen family. Same model as before, deepinfra instead of Cerebras.
+    [
+        "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
+        "hf|google/gemma-4-31B-it:deepinfra",
+        "or|google/gemma-4-26b-a4b-it:free",
+        "or|google/gemma-4-31b-it:free",
+    ],
+    # Slot 4: Google family. Slot 4 used to duplicate slot 1's Llama primary;
+    # Gemma-4-31B was already the panel's Google voice on the OR tails.
+    [
+        "hf|google/gemma-4-31B-it:deepinfra",
+        "hf|openai/gpt-oss-120b:deepinfra",
+        "or|qwen/qwen3.8-27b:free",
+        "or|google/gemma-4-26b-a4b-it:free",
+        "or|google/gemma-4-31b-it:free",
     ],
 ]
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
+
+# ── DOI registrar ─────────────────────────────────────────────────────────────
+# "crossref": accept stages a Crossref deposit draft (crossref_deposit.stage) --
+#             nothing is minted until an operator runs intake/register-doi.sh
+#             --live. ICSAC has been a Crossref member since 2026-07-24.
+# "zenodo":   the pre-membership path (repository_deposit) -- a Zenodo draft
+#             that mints 10.5281/zenodo.* on publish. Kept for the backfile.
+DOI_REGISTRAR = os.environ.get("DOI_REGISTRAR", "crossref")
+CROSSREF_PREFIX = os.environ.get("CROSSREF_PREFIX", "10.67697")
+# The "Last revised" date shown on icsacinstitute.org/terms. Written into every
+# submission record so we can say which Terms an author accepted. Keep in sync.
+TERMS_VERSION = os.environ.get("ICSAC_TERMS_VERSION", "2026-09-27")
+# Suffix pattern; fields: {year} {seq} {sub_id}. seq is per-year, persisted in
+# CROSSREF_SEQ_FILE. Drafts can be re-staged under a new pattern for free;
+# a registered DOI cannot be changed.
+# Venue-neutral on purpose: a paper is published by the Institute at acceptance;
+# selection for the Persistence volume happens later and is not guaranteed.
+CROSSREF_DOI_SUFFIX = os.environ.get("CROSSREF_DOI_SUFFIX", "icsac.{year}.{seq:03d}")
+CROSSREF_SEQ_FILE = os.environ.get("CROSSREF_SEQ_FILE",
+                                   os.path.expanduser("~/icsac-submissions/.doi-seq"))
+# "report-paper" (DEFAULT, 2026-09-27 evening): a peer-reviewed paper published by
+#   the Institute, explicit <publisher> = ICSAC; OpenAlex type "report". Chosen
+#   because inclusion in Persistence is a later, curated, non-guaranteed step, so
+#   the record must not claim that venue at acceptance. A selected paper keeps
+#   this DOI; the Persistence volume gets its own DOI as a book.
+# "journal-article": only for content that IS in a titled serial at deposit time
+#   (CROSSREF_JOURNAL_TITLE); OpenAlex "article" once an ISSN is attached.
+# "posted_content": Crossref's preprint class (OpenAlex labels it "preprint").
+CROSSREF_CONTENT_TYPE = os.environ.get("CROSSREF_CONTENT_TYPE", "report-paper")
+CROSSREF_JOURNAL_TITLE = "Persistence"
+CROSSREF_JOURNAL_ABBREV = ""            # none registered yet
+CROSSREF_JOURNAL_ISSN = os.environ.get("CROSSREF_JOURNAL_ISSN", "")   # eISSN pending (LoC refile >= 2026-11-12)
+CROSSREF_POSTED_TYPE = "other"          # only used for posted_content
+CROSSREF_DEPOSITOR_NAME = "ICSAC"
+CROSSREF_DEPOSITOR_EMAIL = "help@icsacinstitute.org"
+CROSSREF_REGISTRANT = "Institute for Complexity Science and Advanced Computing"
+CROSSREF_PUBLISHER_NAME = CROSSREF_REGISTRANT
+CROSSREF_PUBLISHER_PLACE = "Fort Wayne, Indiana, USA"
+# Same-origin PDF the deposit points Similarity Check / text-mining at.
+# register --live copies paper.pdf to <website>/public/papers/<sub_id>.pdf.
+CROSSREF_PDF_URL = "https://icsacinstitute.org/papers/{sub_id}.pdf"
+CROSSREF_SCHEMA_DIR = os.environ.get("CROSSREF_SCHEMA_DIR",
+                                     os.path.expanduser("~/Desktop/icsac/crossref-schemas"))
+# Deposit credentials: the technical contact's personal Crossref login + role.
+# Live in ~/.config/crossref.env (loaded by intake/register-doi.sh), never here.
+CROSSREF_LOGIN_EMAIL = os.environ.get("CROSSREF_LOGIN_EMAIL", "")
+CROSSREF_ROLE = os.environ.get("CROSSREF_ROLE", "")
+CROSSREF_PASSWORD = os.environ.get("CROSSREF_PASSWORD", "")
+
+# ── CiteStamp citation-graph check (Phase 3 of citation verification) ────────
+# Public MCP endpoint, stateless JSON-RPC, no token needed; a token raises the
+# anonymous rate ceiling if one is ever issued to the pipeline (env only).
+CITESTAMP_MCP_URL = os.environ.get("CITESTAMP_MCP_URL", "https://mcp.citestamp.com/mcp")
+CITESTAMP_MCP_TOKEN = os.environ.get("CITESTAMP_MCP_TOKEN", "")
 
 # Self-heal thresholds (claude + 4 OR slots = 5 total panelists per pass).
 # MIN_REVIEWERS=4 tolerates 1 slot failure per pass after self-heal retry.

@@ -224,7 +224,7 @@ def send_accept_email(to_addr: str, rendered_template: str, send: bool = False) 
         to_addr=to_addr,
         subject=extract_subject(rendered_template),
         body_md=extract_body(rendered_template),
-        send=send,
+        draft=send,   # 2026-09-27: editorial mail is never sent by code -- 'send' = Gmail Drafts
     )
 
 
@@ -233,7 +233,7 @@ def send_revise_and_resubmit_email(to_addr: str, rendered_template: str, send: b
         to_addr=to_addr,
         subject=extract_subject(rendered_template),
         body_md=extract_body(rendered_template),
-        send=send,
+        draft=send,   # 2026-09-27: editorial mail is never sent by code -- 'send' = Gmail Drafts
     )
 
 
@@ -242,7 +242,7 @@ def send_scope_reject_email(to_addr: str, rendered_template: str, send: bool = F
         to_addr=to_addr,
         subject=extract_subject(rendered_template),
         body_md=extract_body(rendered_template),
-        send=send,
+        draft=send,   # 2026-09-27: editorial mail is never sent by code -- 'send' = Gmail Drafts
     )
 
 
@@ -251,5 +251,5 @@ def send_invite_email(to_addr: str, rendered_template: str, send: bool = False) 
         to_addr=to_addr,
         subject=extract_subject(rendered_template),
         body_md=extract_body(rendered_template),
-        send=send,
+        draft=send,   # 2026-09-27: editorial mail is never sent by code -- 'send' = Gmail Drafts
     )

@@ -227,14 +227,28 @@ def _fail_intake(sub_id: str, sub_dir: Path, submission: dict,
                  failure_reason=reason)
     _audit({"sub_id": sub_id, "event": "intake_failed",
             "reason": reason[:300]})
+    # Test tiers: no Gmail draft, no curator Telegram, no pain (a second model I7 -- this
+    # path had no tier routing and would have drafted to production Gmail).
+    if bool(submission.get("test_mode")) or sub_id.startswith("ICSAC-SUB-TEST-"):
+        _log(f"  intake failed for {sub_id} (test tier): {reason[:120]} -- author email + pings suppressed")
+        return
     try:
-        notify_author.send_intake_failure(
+        ok, _info = notify_author.send_intake_failure(
             to=form.get("email", ""),
             sub_id=sub_id,
             author_name=form.get("name", "Researcher"),
             failure_reason=reason,
             remediation=remediation,
         )
+        # Drafted, not sent (2026-09-27) -- tell the curator there is a draft to review.
+        try:
+            notify.send_to_curator(
+                f"Intake failed for {sub_id} ({state_label}): {reason[:160]}\n"
+                + ("Author email is in Gmail Drafts -- review and send by hand."
+                   if ok else "Author email draft FAILED -- write it by hand."),
+                parse_mode=None)
+        except Exception as ping_exc:
+            _log(f"  intake-failure curator ping failed: {ping_exc}", err=True)
     except Exception as exc:
         _audit({"sub_id": sub_id, "event": "intake_failure_email_failed",
                 "error": str(exc)[:200]})

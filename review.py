@@ -282,6 +282,7 @@ def run_claude_review(prompt: str, capture_path: str = None) -> dict:
         try:
             result = subprocess.run(
                 [config.CLAUDE_CMD, "-p",
+                 "--model", "sonnet",
                  "--tools", "",
                  "--setting-sources", ""],
                 input=prompt,
@@ -785,13 +786,29 @@ _NEGATION_RE = re.compile(
 )
 
 
-def _has_unnegated_occurrence(text: str, indicator: str) -> bool:
-    """True if `indicator` appears in `text` outside a negation window.
+# A negation's scope runs to the end of its clause, not 30 characters.
+# Two reviewers once wrote "There is no evidence of generic
+# filler, padded abstract, or fabricated methodology" -- the fixed 30-char
+# window left "padded" and "fabricated" outside the negator's reach, both slots
+# were rejected on every pass and the panel fell below MIN_REVIEWERS twice.
+# Commas continue a list and do NOT break scope; punctuation, contrastive
+# conjunctions, and a comma followed by a new subject (", the prose is padded") do.
+_CLAUSE_BREAK_RE = re.compile(
+    r"[.;:!?\n]"
+    r"|\b(?:but|however|yet|although|though|whereas|while|except)\b"
+    r"|,\s+(?:the|this|that|these|those|it|its|there|they|we|he|she|one|which"
+    r"|some|several|many|most|a|an)\b"
+)
+_NEGATION_SCOPE_CHARS = 200   # a run-on sentence still cannot negate a paragraph
 
-    Walks every occurrence; the indicator counts only if no negator
-    appears within the preceding ~30 chars (and no clause-ending
-    punctuation between the negator and the indicator). Returns False
-    if every occurrence is negated, or if the indicator doesn't appear.
+
+def _has_unnegated_occurrence(text: str, indicator: str) -> bool:
+    """True if `indicator` appears in `text` outside a negation's scope.
+
+    Walks every occurrence. An occurrence is negated when a negator appears
+    earlier in the same clause -- the clause starts at the last clause break
+    (see _CLAUSE_BREAK_RE) within _NEGATION_SCOPE_CHARS before it. Returns
+    False if every occurrence is negated, or if the indicator doesn't appear.
     """
     if not text or not indicator:
         return False
@@ -800,15 +817,9 @@ def _has_unnegated_occurrence(text: str, indicator: str) -> bool:
         idx = text.find(indicator, start)
         if idx == -1:
             return False
-        window_start = max(0, idx - 30)
-        window = text[window_start:idx]
-        # Reject the negation if a clause boundary intervenes between
-        # the negator and the indicator (a period, semicolon, etc.).
-        last_sep = max(
-            window.rfind("."), window.rfind(";"), window.rfind("!"),
-            window.rfind("?"), window.rfind("\n"),
-        )
-        scan = window if last_sep < 0 else window[last_sep + 1:]
+        window = text[max(0, idx - _NEGATION_SCOPE_CHARS):idx]
+        breaks = list(_CLAUSE_BREAK_RE.finditer(window))
+        scan = window[breaks[-1].end():] if breaks else window
         if not _NEGATION_RE.search(scan):
             return True  # this occurrence is in positive context
         start = idx + len(indicator)
@@ -1067,7 +1078,9 @@ def generate_review_markdown(review_data: dict, pass_results: list[list[dict]], 
         f"**Date:** {review_data.get('publication_date', 'N/A')}  ",
         f"**Recommendation:** {rec}  ",
         f"**Panel Passes:** {n_passes}  ",
-        f"**Model Disagreement:** {'Yes' if aggregate.get('disagreement') else 'No'}",
+        f"**Model Disagreement:** {'Yes' if aggregate.get('disagreement') else 'No'}  ",
+        *([f"**Citations:** {_citation_header_line(review_data.get('record_id'))}"]
+          if _citation_header_line(review_data.get('record_id')) else []),
         "",
         "## Aggregate Scores",
         "",
@@ -1264,7 +1277,60 @@ def _run_citation_verify(review_data: dict) -> str:
     if citations:
         report = _run_citation_misattribution(record_id, citations, citation_text, report)
 
+    # Phase 3: citation graph check against CiteStamp (refutations / supports /
+    # coverage). Fail-open like Phase 2; the report gains a section either way.
+    if citations:
+        report = _run_citestamp_check(record_id, citations, report)
+
     return report
+
+
+def _run_citestamp_check(record_id: str, citations: list[dict], report: str) -> str:
+    """Phase 3 (2026-09-27): ask CiteStamp's graph about every DOI-resolved
+    citation -- known? refuted? supported? -- and merge the answers into the
+    verification report the panel reads. ~3 stateless MCP calls per DOI,
+    no model tokens. Persists under the "citestamp" key of the citations
+    JSON so the review header and the public record can quote it."""
+    try:
+        import citestamp_check
+        print("  CiteStamp graph check: querying...")
+        res = citestamp_check.check_citations(citations, log=print)
+        report = citestamp_check.merge_into_verification_report(report, res)
+        try:
+            cit_json = os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.json")
+            if os.path.exists(cit_json):
+                with open(cit_json) as f:
+                    payload = json.load(f)
+                payload["citestamp"] = res
+                with open(cit_json, "w") as f:
+                    json.dump(payload, f, indent=2)
+                cit_md = os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.md")
+                with open(cit_md, "w") as f:
+                    f.write(report)
+        except Exception:
+            pass
+    except Exception as exc:
+        print(f"  CiteStamp graph check failed (non-fatal): {type(exc).__name__}: {exc}")
+    return report
+
+
+def _citation_header_line(record_id) -> str | None:
+    """'19/20 resolved · CiteStamp: 14/14 in graph, 0 refuted, 0 supported' from the
+    saved citations JSON; None when there is nothing to say."""
+    try:
+        with open(os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.json")) as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    parts = []
+    cits = payload.get("citations") or []
+    if cits:
+        parts.append(f"{sum(1 for c in cits if c.get('verified'))}/{len(cits)} resolved")
+    cs = payload.get("citestamp")
+    if cs:
+        import citestamp_check
+        parts.append(citestamp_check.summary_line(cs))
+    return " · ".join(parts) if parts else None
 
 
 def _run_citation_misattribution(record_id: str, citations: list[dict],

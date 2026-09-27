@@ -133,13 +133,16 @@ def send_intake_failure(*, to: str, sub_id: str, author_name: str,
         "failure_reason": failure_reason,
         "remediation": remediation,
     })
+    # DRAFT, not send (2026-09-27): the only author email that goes out on its
+    # own is the intake receipt. The worker pings the curator to review this.
     return email_send.send_email(to_addr=to, subject=subject,
-                                 body_md=body, send=True)
+                                 body_md=body, draft=True)
 
 
 def send_published(*, to: str, sub_id: str, title: str, author_name: str,
                    deposit_doi: str, deposit_url: str,
-                   publications_url: str) -> tuple[bool, str]:
+                   publications_url: str, curator_note: str = "",
+                   license_name: str = "") -> tuple[bool, str]:
     """Send the post-publish notification email for a PDF-route accept.
 
     Fired by the publish_watcher in the editorial-system repo when a curator
@@ -154,9 +157,13 @@ def send_published(*, to: str, sub_id: str, title: str, author_name: str,
         "deposit_doi": deposit_doi,
         "deposit_url": deposit_url,
         "publications_url": publications_url,
+        "license_name": license_name or "the open licence you selected",
+        "curator_note": curator_note.strip() or (
+            "[CURATOR NOTE - optional: one sentence to the author before sending, "
+            "or delete this bracket.]"),
     })
     return email_send.send_email(to_addr=to, subject=subject,
-                                 body_md=body, send=True)
+                                 body_md=body, draft=True)  # Gmail Drafts; curator sends (2026-09-27)
 
 
 def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
@@ -169,6 +176,10 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   publications_url: str | None = None,
                   tier: int = 1,
                   compaction_manifest: dict | None = None,
+                                    curator_note: str = "", received_date: str = "",
+                  decided_date: str = "", citation_line: str = "",
+                  author_display: str = "", affiliation: str = "", license_name: str = "",
+                  terms_version: str = "",
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -251,6 +262,22 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "deposit_url": deposit_url or "",
         "publications_url": publications_url or "",
         "compaction_disclosure": disclosure,
+        # 2026-09-27: the accept email carries the story the author will retell.
+        # An empty curator note renders a LOUD placeholder so the draft cannot be
+        # sent without a human sentence about the paper.
+        "curator_note": curator_note.strip() or (
+            "[CURATOR NOTE - write one or two sentences about this paper in your own words "
+            "before sending. Delete this bracket.]"),
+        "received_date": received_date or "(date)",
+        "decided_date": decided_date or "(date)",
+        "author_display": author_display or author_name,
+        "affiliation_line": f" ({affiliation})" if affiliation else "",
+        "license_name": license_name or "the open licence you selected",
+        "terms_version": terms_version or "current",
+        "review_pdf_name": f"icsac-review-{sub_id}.pdf",
+        "rqc_pdf_name": f"icsac-rqc-{sub_id}.pdf",
+        "citation_line": citation_line or (
+            "Your reference list was resolved against public registries as part of the review."),
     })
 
     attachments: list[tuple[str, bytes]] = []

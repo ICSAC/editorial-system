@@ -164,8 +164,94 @@ def main(argv: list[str]) -> int:
     # template either way. Mirrors submission_worker.process().
     deposit_record_id = state_pre.get("deposit_record_id")
     skip_zenodo = test_mode and tier == 2
+    registrar = getattr(config, "DOI_REGISTRAR", "crossref")
+
+    # 2026-09-27: ICSAC is a Crossref member. Under registrar="crossref" an
+    # accept stages a DEPOSIT DRAFT on disk (<sub_dir>/crossref/deposit.xml,
+    # schema-validated, DOI string assigned under 10.67697) and stages NOTHING
+    # on Zenodo. The DOI is registered only when an operator runs
+    # intake/register-doi.sh --live; the accept email still says "pending".
+    # Test tiers never stage (a draft is harmless, but the counter would burn).
+    # T2 has no external side effects at all; T3 rehearses with a TEST DOI (no
+    # counter burn) and a sandbox Zenodo draft, exactly like production.
+    crossref_path = (verdict == "accept" and source == "upload"
+                     and registrar == "crossref" and not (test_mode and tier == 2))
+    if crossref_path and not state_pre.get("crossref_doi"):
+        try:
+            import crossref_deposit
+            explicit = (f"{config.CROSSREF_PREFIX}/TEST.{sub_id}" if test_mode else None)
+            staged = crossref_deposit.stage(sub_dir, submission, doi=explicit,
+                                            log=lambda m: print(m, file=sys.stderr))
+            state_pre["crossref_doi"] = staged["doi"]
+            state_pre["crossref_staged_at"] = _now_iso()
+            state_pre["crossref_deposit_xml"] = staged["xml_path"]
+            state_pre["crossref_landing_url"] = staged["landing_url"]
+            _audit({"sub_id": sub_id, "event": "crossref_draft_staged",
+                    "doi": staged["doi"], "landing_url": staged["landing_url"],
+                    "by": "curator"}, test_mode=test_mode)
+        except Exception as exc:
+            print(f"  crossref stage failed for {sub_id}: {exc}", file=sys.stderr)
+            _audit({"sub_id": sub_id, "event": "crossref_draft_failed",
+                    "reason": f"{type(exc).__name__}: {exc}"[:500],
+                    "by": "curator"}, test_mode=test_mode)
+
+    # Archival copy on Zenodo as a DRAFT that carries the ICSAC DOI as an
+    # external DOI (Zenodo mints nothing). register-doi.sh --live publishes it
+    # only after Crossref confirms the DOI. Same deposit_consent contract.
+    cr_doi = state_pre.get("crossref_doi")
+    if (crossref_path and cr_doi and form.get("deposit_consent")
+            and not state_pre.get("deposit_record_id")):
+        try:
+            import repository_deposit as zenodo_deposit
+            # ANY test-tier submission goes to the sandbox (a second model I7: a test record
+            # missing its tier field used to fall through to production Zenodo).
+            sandbox = bool(test_mode)
+            draft = zenodo_deposit.stage_deposit_draft(
+                submission, sub_dir / "paper.pdf",
+                log=lambda m: print(m, file=sys.stderr),
+                sandbox=sandbox, external_doi=cr_doi,
+            )
+            if draft:
+                state_pre["deposit_record_id"] = draft["record_id"]
+                state_pre["deposit_draft_url"] = draft["draft_url"]
+                _audit({"sub_id": sub_id, "event": "deposit_draft_completed",
+                        "deposit_record_id": draft["record_id"],
+                        "deposit_draft_url": draft["draft_url"],
+                        "external_doi": cr_doi, "by": "curator"}, test_mode=test_mode)
+        except Exception as exc:
+            print(f"  zenodo draft (external DOI) failed for {sub_id}: {exc}", file=sys.stderr)
+            _audit({"sub_id": sub_id, "event": "deposit_draft_failed",
+                    "reason": f"{type(exc).__name__}: {exc}"[:500],
+                    "by": "curator"}, test_mode=test_mode)
+
+    if crossref_path and (not test_mode or tier == 3):
+        # One message with everything the curator needs to inspect before the
+        # irreversible step, and the exact command that performs it.
+        try:
+            lines = [f"ACCEPT staged for {sub_id} -- nothing minted, nothing sent.",
+                     f"Title: {title[:120]}"]
+            if cr_doi:
+                lines += [f"ICSAC DOI (reserved, not registered): {cr_doi}",
+                          f"Crossref XML draft: {state_pre.get('crossref_deposit_xml')}",
+                          f"Will resolve to: {state_pre.get('crossref_landing_url')}"]
+            else:
+                lines.append("Crossref draft: FAILED to stage -- see audit log")
+            if state_pre.get("deposit_draft_url"):
+                lines.append(f"Zenodo archive DRAFT (unpublished): {state_pre['deposit_draft_url']}")
+            elif form.get("deposit_consent"):
+                lines.append("Zenodo archive draft: NOT staged -- see audit log")
+            else:
+                lines.append("Zenodo archive: author did not consent to deposit")
+            lines += ["Acceptance email: Gmail Drafts (review and send by hand).",
+                      f"When ready: intake/register-doi.sh {sub_id} --live"]
+            notify.send_to_curator("\n".join(lines), parse_mode=None,
+                                   **_curator_routing(test_mode, tier))
+        except Exception as exc:
+            print(f"  accept summary ping failed: {exc}", file=sys.stderr)
+
     if (verdict == "accept"
             and source == "upload"
+            and registrar == "zenodo"
             and not deposit_record_id
             and form.get("deposit_consent")
             and not skip_zenodo):
@@ -205,6 +291,41 @@ def main(argv: list[str]) -> int:
         except Exception as exc:
             print(f"  manifest load failed: {exc}", file=sys.stderr)
 
+    # Dates the author will quote back ("submitted Sunday, decided Tuesday").
+    def _us(iso):
+        try:
+            from datetime import datetime as _dtm
+            return _dtm.fromisoformat(iso.replace("Z", "+00:00")).strftime("%B %-d, %Y")
+        except Exception:
+            return ""
+    received_date = _us(state_pre.get("received_at") or submission.get("received_at") or "")
+    decided_date = _us(_now_iso())
+    citation_line = ""
+    try:
+        import review as _review
+        hdr = _review._citation_header_line(sub_id)
+        if hdr:
+            citation_line = ("Your reference list was checked as part of the review: "
+                             + hdr.replace(" · ", "; ") + ".")
+    except Exception:
+        pass
+
+    # Attribution exactly as the deposits will carry it, so the author can object
+    # before the DOI is permanent.
+    author_display, affiliation, license_name = "", "", ""
+    try:
+        import crossref_deposit as _cd
+        creators = submission.get("creators") or []
+        if creators:
+            c0 = creators[0] if isinstance(creators[0], dict) else {"name": str(creators[0])}
+            author_display = _cd.display_name(c0.get("name", ""))
+            affiliation = (c0.get("affiliation") or "").strip()
+            if len(creators) > 1:
+                author_display += " et al."
+        license_name = _cd.LICENSE_LABELS.get((submission.get("license") or "").lower(), "")
+    except Exception:
+        pass
+
     ok, info = notify_author.send_decision(
         to=form["email"], sub_id=sub_id, title=title,
         author_name=form["name"], verdict=verdict,
@@ -214,6 +335,10 @@ def main(argv: list[str]) -> int:
         publications_url=publications_url_str,
         tier=tier,
         compaction_manifest=compaction_manifest,
+        curator_note=note or "", received_date=received_date,
+        decided_date=decided_date, citation_line=citation_line,
+        author_display=author_display, affiliation=affiliation, license_name=license_name,
+        terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
@@ -267,7 +392,8 @@ def main(argv: list[str]) -> int:
         **_curator_routing(test_mode, tier),
     )
 
-    print(f"applied {verdict} for {sub_id}; email_sent={ok}")
+    print(f"applied {verdict} for {sub_id}; email_drafted={ok} "
+          f"({'test outbox' if test_mode and tier == 2 else 'Gmail Drafts'} -- nothing was sent)")
     return 0 if ok else 1
 
 
