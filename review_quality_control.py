@@ -194,6 +194,7 @@ def run_claude_rqc(prompt: str) -> dict:
     try:
         result = subprocess.run(
             [config.CLAUDE_CMD, "-p",
+             "--model", "sonnet",
              "--tools", "",
              "--setting-sources", ""],
             input=prompt,

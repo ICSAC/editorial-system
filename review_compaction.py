@@ -149,7 +149,7 @@ def _claude_call(manuscript: str, *, timeout_sec: int = 600) -> tuple[str, str, 
     this module expects (_extract_json parses it).
     """
     proc = subprocess.run(
-        [config.CLAUDE_CMD, "-p"],
+        [config.CLAUDE_CMD, "-p", "--model", "sonnet"],
         input=EXTRACT_PROMPT + "\n\n" + manuscript,
         capture_output=True,
         text=True,

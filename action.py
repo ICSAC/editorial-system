@@ -20,6 +20,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import urllib.request
 import urllib.error
 
@@ -49,10 +50,22 @@ def _resolve_community_uuid() -> str:
     url = f"{config.ZENODO_API}/communities/{config.COMMUNITY_ID}"
     req = urllib.request.Request(url)
     req.add_header("Authorization", f"Bearer {config.ZENODO_TOKEN}")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode())
-    _COMMUNITY_UUID_CACHE = data["id"]
-    return _COMMUNITY_UUID_CACHE
+    # Retry transient network failures. A single 30s timeout here crashed the
+    # whole watch-tick on 2026-07-10 (-> systemd failed -> parked). 3 tries with
+    # short backoff; a sustained outage still raises so a genuine break surfaces.
+    _last_err = None
+    for _attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+            _COMMUNITY_UUID_CACHE = data["id"]
+            return _COMMUNITY_UUID_CACHE
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            _last_err = e
+            if _attempt < 2:
+                time.sleep(2 * (_attempt + 1))
+    raise RuntimeError(
+        f"could not resolve ICSAC community UUID after 3 tries: {_last_err}")
 
 
 def get_community_requests(open_only: bool = True) -> list[dict]:
@@ -71,11 +84,33 @@ def get_community_requests(open_only: bool = True) -> list[dict]:
         url = f"{config.ZENODO_API}/user/requests?size=100&page={page}"
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {config.ZENODO_TOKEN}")
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-        except urllib.error.URLError as e:
-            print(f"  Error fetching user requests page {page}: {e}")
+        # Retry transient network failures, same as _resolve_community_uuid.
+        # `except urllib.error.URLError` alone did NOT cover this: on py3.11
+        # socket.timeout IS TimeoutError, and TimeoutError is NOT a subclass of
+        # URLError — so a read timeout escaped uncaught, propagated out of
+        # tick(), and crashed the whole watch-tick (-> systemd failed -> parked
+        # on 2026-07-10 and again 2026-07-28). The 2026-07-10 fix hardened
+        # _resolve_community_uuid but left this call, the one that actually
+        # crashed on 07-28, unprotected.
+        data = None
+        _fetched = False
+        _last_err = None
+        for _attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read().decode())
+                _fetched = True
+                break
+            except (urllib.error.URLError, TimeoutError, OSError) as e:
+                _last_err = e
+                if _attempt < 2:
+                    time.sleep(2 * (_attempt + 1))
+        if not _fetched:
+            # Sustained outage: report what we have rather than raising. A
+            # short list just means "nothing new this tick"; the next tick
+            # retries. Crashing here is what created the stale parks.
+            print(f"  Error fetching user requests page {page} "
+                  f"after 3 tries: {_last_err}")
             break
         hits = data.get("hits", {}).get("hits", [])
         if not hits:
