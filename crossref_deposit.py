@@ -588,7 +588,8 @@ def poll_result(batch_id: str, *, live: bool, expect_doi: Optional[str] = None,
         delay = min(delay * 2, 120)
 
 
-def register(sub_dir: Path, *, live: bool = False, log: Callable[[str], None] = print) -> dict:
+def register(sub_dir: Path, *, live: bool = False, override_window: bool = False,
+             log: Callable[[str], None] = print) -> dict:
     """The irreversible step, made resumable (rewritten after the 2026-09-27 audit).
 
     TEST (default): deposit the staged XML to test.crossref.org and poll. No state
@@ -637,6 +638,12 @@ def register(sub_dir: Path, *, live: bool = False, log: Callable[[str], None] = 
         raise CrossrefError(f"{sub_dir.name} has no curator ACCEPT on record "
                             f"(state.decision={state.get('decision')!r}); run intake/decide.sh "
                             f"{sub_dir.name} accept first. The machine never decides.")
+    # The author's word, or the window's close (2026-09-27). Withdraw/hold refuse.
+    from intake import author_approval
+    ok, why = author_approval.gate(sub_dir, override_window=override_window)
+    if not ok:
+        raise CrossrefError(f"{sub_dir.name}: {why}")
+    log(f"  crossref: author gate: {why}")
     ck = staged.setdefault("checkpoints", {})
     outcome = {"doi": doi, "live": True, "resumed": bool(ck)}
     try:
@@ -776,6 +783,13 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     lic = LICENSE_URLS.get((submission.get("license") or "").lower())
     if lic:
         proto["license_url"] = lic   # the landing page shows the licence + copyright line
+    st_now = json.loads((sub_dir / "state.json").read_text()) if (sub_dir / "state.json").exists() else {}
+    if st_now.get("promotion_opt_out"):
+        proto["promotion_opt_out"] = True   # honoured by any promotion tooling reading the registry
+    if st_now.get("author_exclusions"):
+        proto["promotion_exclusions"] = [x for x in st_now["author_exclusions"] if x != "persistence"]
+    if st_now.get("persistence_opt_out"):
+        proto["persistence_opt_out"] = True
     entry = publications.upsert_entry(proto)
     if not entry:
         log("  crossref: publications registry not configured; landing page NOT pushed")
@@ -846,6 +860,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--content-type", choices=["journal-article", "report-paper", "posted_content"])
     r = sp.add_parser("register", help="deposit the staged XML (TEST system unless --live)")
     r.add_argument("sub_id"); r.add_argument("--live", action="store_true")
+    r.add_argument("--override-window", action="store_true",
+                   help="register before the author's objection window closes (never past a hold or withdrawal)")
     v = sp.add_parser("validate", help="schema-check an XML file"); v.add_argument("path")
     a = ap.parse_args(argv)
     try:
@@ -861,7 +877,7 @@ def main(argv: list[str]) -> int:
                 if input().strip() != a.sub_id:
                     print("aborted"); return 2
             try:
-                res = register(_resolve(a.sub_id), live=a.live)
+                res = register(_resolve(a.sub_id), live=a.live, override_window=a.override_window)
             except Exception as e:  # ANY live failure reaches the curator, not only ours (a second model I4)
                 if a.live:
                     _ping(f"DOI registration FAILED for {a.sub_id}: {type(e).__name__}: {str(e)[:300]}\n"

@@ -1343,6 +1343,47 @@ async def api_sponsor_prefill(request: Request):
     return prefill_for_session(session_id)
 
 
+@app.get("/api/approve/{token}")
+def api_approve_view(token: str):
+    # Public read of what the author's link points at. The token IS the
+    # credential; the view carries no email, path or panel internals.
+    from . import author_approval  # local
+    try:
+        sub_dir, rec = author_approval.resolve(token)
+    except Exception:
+        raise HTTPException(404, "no such approval link")
+    return author_approval.public_view(sub_dir, rec)
+
+
+@app.post("/api/approve")
+async def api_approve_record(request: Request):
+    # HMAC-gated like /api/submit: only the site's proxy can record a choice.
+    body = await request.body()
+    _verify_hmac(request, body)
+    from . import author_approval  # local
+    try:
+        d = json.loads(body or b"{}")
+    except ValueError:
+        raise HTTPException(400, "bad json")
+    try:
+        sub_dir, rec = author_approval.resolve(str(d.get("t") or ""))
+    except Exception:
+        raise HTTPException(404, "no such approval link")
+    test_mode = author_approval.is_test(sub_dir.name)
+    try:
+        excl = d.get("exclusions") or []
+        if not isinstance(excl, list) or len(excl) > 20:
+            raise HTTPException(400, "bad exclusions")
+        return author_approval.record(
+            sub_dir, rec, str(d.get("choice") or ""), str(d.get("note") or ""),
+            [str(x) for x in excl],
+            audit=lambda e: _audit_append(e, test_mode=test_mode))
+    except author_approval.Locked as e:
+        raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/ebook-verify")
 async def api_ebook_verify(request: Request):
     # Read-only: confirm a Checkout Session is a paid ebook purchase. Called by

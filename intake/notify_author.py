@@ -179,7 +179,8 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                                     curator_note: str = "", received_date: str = "",
                   decided_date: str = "", citation_line: str = "",
                   author_display: str = "", affiliation: str = "", license_name: str = "",
-                  terms_version: str = "",
+                  terms_version: str = "", approval_url: str = "",
+                  objection_deadline: str = "",
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -274,6 +275,8 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "affiliation_line": f" ({affiliation})" if affiliation else "",
         "license_name": license_name or "the open licence you selected",
         "terms_version": terms_version or "current",
+        "approval_url": approval_url or "https://icsacinstitute.org/contact",
+        "objection_deadline": objection_deadline or "the date in our follow-up",
         "review_pdf_name": f"icsac-review-{sub_id}.pdf",
         "rqc_pdf_name": f"icsac-rqc-{sub_id}.pdf",
         "citation_line": citation_line or (
