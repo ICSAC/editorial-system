@@ -2,6 +2,7 @@
 """ICSAC Editorial System — workflow entry point."""
 
 import argparse
+import os
 import sys
 
 import config
@@ -145,16 +146,35 @@ def check_model_availability(timeout: int = 15) -> dict:
             return (mid, prov) in hf_live
         return False
 
+    def _entry_state(entry):
+        # "oai|<provider>|<model>" (2026-09-28): a direct provider with our own
+        # key. Reachable when the key is in the environment; UNCONFIGURED (not
+        # missing, no pain) when it is not, so a roster can carry the entry
+        # before the key exists. There is no catalog to check.
+        kind, sep, model = entry.partition("|")
+        if sep and kind == "oai":
+            prov, _, _mdl = model.partition("|")
+            spec = (getattr(config, "OAI_COMPAT_PROVIDERS", None) or {}).get(prov) or {}
+            if not spec.get("base_url"):
+                return "missing"
+            key_env = spec.get("key_env", "")
+            has_key = bool(key_env and (os.environ.get(key_env) or getattr(config, key_env, "")))
+            return "reachable" if has_key else "unconfigured"
+        return "reachable" if _entry_reachable(entry) else "missing"
+
     slots_info = []
     for i, slot in enumerate(getattr(config, "OPENROUTER_MODELS", []), 1):
         chain = list(slot) if isinstance(slot, list) else [slot]
-        reachable = [m for m in chain if _entry_reachable(m)]
-        missing = [m for m in chain if not _entry_reachable(m)]
+        states = {m: _entry_state(m) for m in chain}
+        reachable = [m for m in chain if states[m] == "reachable"]
+        missing = [m for m in chain if states[m] == "missing"]
+        unconfigured = [m for m in chain if states[m] == "unconfigured"]
         slots_info.append({
             "index": i,
             "chain": chain,
             "reachable": reachable,
             "missing": missing,
+            "unconfigured": unconfigured,
             "dead": len(reachable) == 0,
         })
 
@@ -356,7 +376,10 @@ def main():
         for slot in result["slots"]:
             print(f"  Slot {slot['index']}: {' -> '.join(slot['chain'])}")
             for m in slot["chain"]:
-                marker = "OK" if m in slot["reachable"] else "MISSING (not in OR free list / not served by pinned HF provider)"
+                if m in slot.get("unconfigured", []):
+                    marker = "NOT CONFIGURED (no key in the environment)"
+                else:
+                    marker = "OK" if m in slot["reachable"] else "MISSING (not in OR free list / not served by pinned HF provider)"
                 print(f"           {m}: {marker}")
             if slot["dead"]:
                 print(f"           !! SLOT {slot['index']} IS DEAD (every fallback missing)")
@@ -415,6 +438,16 @@ def main():
         _sys.argv = ["watch"] + (["--skip-reviews"] if skip_reviews else [])
         rc = watch.main()
 
+        print("[2b] Panel retry + scream (papers the panel could not staff)...")
+        try:
+            import panel_retry
+            _pr = panel_retry.tick()
+            print(f"  panel: requeued={_pr['requeued']} screamed={_pr['screamed']} "
+                  f"stuck={_pr['stuck']} errors={_pr['errors']}")
+        except Exception as e:
+            print(f"  panel retry crashed (non-fatal): {e}")
+            _pr = {"requeued": 0, "screamed": 0, "stuck": 0, "errors": 1}
+
         print("[3a] Author objection windows...")
         try:
             from intake import author_approval
@@ -469,6 +502,7 @@ def main():
                 f"Models: {model_status}\n"
                 f"Reviews: {'SKIPPED (starved panel)' if skip_reviews else 'ran'}\n"
                 f"Watch tick exit: {rc}\n"
+                f"Panel: {_pr['requeued']} re-queued, {_pr['screamed']} screaming\n"
                 f"{publish_line}\n\n"
                 f"Transitions (accept/decline) always run regardless of model state."
             )

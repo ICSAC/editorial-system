@@ -73,7 +73,11 @@ For each submission:
    methodology, calibration, tone, AI provenance signal). Each reviewer scores
    blind to the others. The panel tolerates one slot failure per pass via
    self-heal (MIN_REVIEWERS=4), so a published review may reflect four valid
-   outputs if a slot errored.
+   outputs if a slot errored. Each slot is a chain of providers (direct
+   free-tier providers with the institute's own keys, the Hugging Face
+   router, OpenRouter). A paper the panel cannot staff is re-queued on
+   every batch tick and the curation team is alerted loudly once it has
+   waited a day for reviewers.
 5. **Review quality control** ([`review_quality_control.py`](review_quality_control.py)) —
    a separate auditor reviews the panel itself. Low-confidence dimensions,
    missing injection indicators, or systemic drift trigger curator alerts.

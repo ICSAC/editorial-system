@@ -96,45 +96,71 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 # different model on the same provider absorbs it. Same trade-off as 04-27:
 # a fallback can duplicate another slot's primary; reliability beats diversity.
 OPENROUTER_MODELS = [
-    # Slot 1: DeepSeek family (was Llama-4-Scout until 2026-09-27: the RQC
-    # audit on a submission scored its specificity 1/5 in BOTH passes -- template
-    # justifications naming no section, figure or number -- so it was a
-    # reviewer in name only). No enabled provider serves Llama-3.3-70B any
-    # more. Fallback GLM-4.7-Flash keeps the slot cross-family.
+    # 2026-09-28 (the curator): a free direct provider first wherever one exists, the
+    # HF router second (a $0.10/month credit pool), OpenRouter :free last (a shared
+    # pool that 429s). `oai|<provider>|<model>` entries need the provider's key in
+    # the environment (OAI_COMPAT_PROVIDERS); without it they are skipped silently,
+    # so the roster can be wired before the keys exist. A paper the panel cannot
+    # staff is re-queued every batch tick (panel_retry.py) and screams after 24 h.
+    # Slot 1: DeepSeek family.
     [
+        "oai|sambanova|DeepSeek-V3.1",
         "hf|deepseek-ai/DeepSeek-V4-Flash:deepinfra",
         "hf|zai-org/GLM-4.7-Flash:deepinfra",
+        "or|nvidia/nemotron-3-ultra-550b-a55b:free",
         "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-31b-it:free",
-        "or|google/gemma-4-26b-a4b-it:free",
     ],
-    # Slot 2: OpenAI open-weights. Same model as before, deepinfra instead of
-    # Groq. -> OR Nvidia/Hermes tail.
+    # Slot 2: OpenAI open-weights.
     [
+        "oai|sambanova|gpt-oss-120b",
         "hf|openai/gpt-oss-120b:deepinfra",
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
-        "or|google/gemma-4-31b-it:free",
+        "or|nvidia/nemotron-3-super-120b-a12b:free",
         "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-26b-a4b-it:free",
     ],
-    # Slot 3: Qwen family. Same model as before, deepinfra instead of Cerebras.
+    # Slot 3: Mistral / Qwen family (Mistral activates when MISTRAL_API_KEY exists).
     [
+        "oai|mistral|mistral-large-latest",
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
         "hf|google/gemma-4-31B-it:deepinfra",
+        "or|nvidia/nemotron-3-ultra-550b-a55b:free",
         "or|google/gemma-4-26b-a4b-it:free",
         "or|google/gemma-4-31b-it:free",
     ],
-    # Slot 4: Google family. Slot 4 used to duplicate slot 1's Llama primary;
-    # Gemma-4-31B was already the panel's Google voice on the OR tails.
+    # Slot 4: Google family.
     [
         "hf|google/gemma-4-31B-it:deepinfra",
-        "hf|openai/gpt-oss-120b:deepinfra",
+        "or|google/gemma-4-31b-it:free",
+        "oai|sambanova|gemma-4-31B-it",
+        "or|nvidia/nemotron-3-super-120b-a12b:free",
         "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-26b-a4b-it:free",
-        "or|google/gemma-4-31b-it:free",
     ],
 ]
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
+
+# OpenAI-compatible direct providers for `oai|<provider>|<model>` panel entries
+# (2026-09-28). Keys come from the environment; an entry whose key is absent is
+# skipped, not counted as a dead chain link.
+OAI_COMPAT_PROVIDERS = {
+    # free tier, no card: about 20 requests and 200K tokens per day, 128k context
+    "sambanova": {"base_url": "https://api.sambanova.ai/v1", "key_env": "SAMBANOVA_API_KEY"},
+    # free "experiment" mode; its limits are shown only in the Mistral admin panel
+    "mistral":   {"base_url": "https://api.mistral.ai/v1",   "key_env": "MISTRAL_API_KEY"},
+}
+# panel_retry.py (batch-tick step 2b): a paper the panel could not staff is
+# re-queued every tick and SCREAMS (Telegram + pain) after this many hours of
+# waiting for reviewers, counted from its first pause, never from receipt. A
+# paper stuck in_review this long with no result is treated as a dead worker.
+PANEL_SCREAM_HOURS = float(os.environ.get("ICSAC_PANEL_SCREAM_HOURS", "24"))
+PANEL_STUCK_HOURS = float(os.environ.get("ICSAC_PANEL_STUCK_HOURS", "3"))
+# after this many automatic re-queues (about five days at two ticks a day) the
+# paper keeps screaming but is not re-run again without a human
+PANEL_MAX_RETRIES = int(os.environ.get("ICSAC_PANEL_MAX_RETRIES", "10"))
+# papers paused before this instant are announced once and left parked
+PANEL_RETRY_SINCE = os.environ.get("ICSAC_PANEL_RETRY_SINCE", "2026-09-28T00:00:00Z")
 
 # ── DOI registrar ─────────────────────────────────────────────────────────────
 # "crossref": accept stages a Crossref deposit draft (crossref_deposit.stage) --
