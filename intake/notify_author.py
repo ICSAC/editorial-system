@@ -291,10 +291,11 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
             "affiliations, contact information, acknowledgments, funding "
             "statements, and the references list before the panel reads "
             "the manuscript. For your submission this preprocessing did "
-            f"not run ({failure}); the panel reviewed your manuscript "
-            "as submitted. If you believe the unredacted form influenced "
-            "the decision in a way you want to contest, contact "
-            "help@icsacinstitute.org and reference your submission ID."
+            f"not complete ({failure}), so the manuscript was withheld from "
+            "the automated panel and the decision rests with the curation "
+            "team. If you believe this affected the decision in a way you "
+            "want to contest, contact help@icsacinstitute.org and reference "
+            "your submission ID."
         )
     else:
         manifest_lines = review_compaction.render_manifest(compaction_manifest)

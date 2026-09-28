@@ -93,8 +93,8 @@ try:
     check(txt == "" and man.get("_failure") == "no identity spans identified", "compaction: an empty extraction fails closed")
     fake({"author_names": ["Jane M. Doe"], "affiliations": ["University of Example"], "emails": ["jdoe@example.edu"]})
     txt, man = rc.compact_paper(paper, log=lambda m: None)
-    check(not man.get("_failure") and "Jane" not in txt and "jdoe@" not in txt and "University of Example" not in txt,
-          "compaction: a line-wrapped name is removed (whitespace-tolerant)")
+    check(not man.get("_failure") and "Jane M." not in txt and "Doe\n" not in txt and "jdoe@" not in txt
+          and "University of Example" not in txt, "compaction: a line-wrapped name is removed (whitespace-tolerant)")
     check("Janedoe" in txt and "Lithium" in txt, "compaction: bounded matching leaves longer words alone")
     check(man.get("author_names") == ["Jane M. Doe"], "compaction: the manifest records what was removed")
     fake({"author_names": ["Jane M. Doe"], "emails": ["nobody@example.org"]})
