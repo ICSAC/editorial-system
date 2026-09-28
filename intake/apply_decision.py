@@ -115,6 +115,17 @@ def main(argv: list[str]) -> int:
         return 1
 
     submission = json.loads((sub_dir / "submission.json").read_text())
+    force = os.environ.get("ICSAC_DECISION_FORCE") == "1"
+    _state_now = sub_dir / "state.json"
+    _decided = json.loads(_state_now.read_text()).get("decision") if _state_now.exists() else None
+    if _decided and not force:
+        # A decision is on record: a second run would draft a second email and
+        # re-open the author's window (audit 2026-09-28 item 6). Checked before
+        # any work is done.
+        print(f"{sub_id} already has a decision on record: {_decided}. Nothing done. "
+              f"To apply it again anyway (a lost draft, a corrected note) run with "
+              f"ICSAC_DECISION_FORCE=1.", file=sys.stderr)
+        return 3
     # tier is intake-asserted on the submission record; test_mode is
     # the canonical isolation flag. Re-derive both from the sub_id
     # prefix too as a belt-and-suspenders check against a forged
@@ -316,12 +327,23 @@ def main(argv: list[str]) -> int:
     if verdict == "accept" and source == "upload" and not (test_mode and tier == 2):
         try:
             from . import author_approval
-            ap = author_approval.issue(sub_dir)
+            ap = author_approval.issue(sub_dir, force=force)
             approval_url, objection_deadline = ap["url"], ap["deadline_display"]
             _audit({"sub_id": sub_id, "event": "author_window_opened",
                     "deadline": ap["deadline"], "by": "curator"}, test_mode=test_mode)
         except Exception as exc:
-            print(f"  author approval window failed to open: {exc}", file=sys.stderr)
+            # No window means no link in the email and no gate on registration:
+            # stop before anything is drafted (audit 2026-09-28 item 5).
+            print(f"  author approval window failed to open: {exc}; the accept was NOT applied",
+                  file=sys.stderr)
+            try:
+                notify.send_to_curator(
+                    f"ICSAC accept ABORTED for {sub_id}: the author response window could not be "
+                    f"opened ({str(exc)[:160]}). Nothing drafted, nothing recorded.",
+                    parse_mode=None, **_curator_routing(test_mode, tier))
+            except Exception:
+                pass
+            return 1
 
     # Attribution exactly as the deposits will carry it, so the author can object
     # before the DOI is permanent.

@@ -227,6 +227,46 @@ def _flexible_find(haystack: str, needle: str, start_at: int = 0) -> tuple[int, 
     return start_at + m.start(), start_at + m.end()
 
 
+def _flexible_find_bounded(haystack: str, needle: str) -> tuple[int, int]:
+    """_flexible_find for short identity snippets: whitespace-tolerant AND
+    bounded by non-word characters, so a short surname never matches inside
+    a longer word."""
+    tokens = re.findall(r"\S+", needle or "")
+    if not tokens:
+        return -1, -1
+    pattern = r"(?<!\w)" + r"\s+".join(re.escape(tok) for tok in tokens) + r"(?!\w)"
+    m = re.search(pattern, haystack)
+    if not m:
+        return -1, -1
+    return m.start(), m.end()
+
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_ORCID_RE = re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b")
+
+
+def blind_aux_text(text: str, manifest: dict) -> str:
+    """Apply a successful compaction's removed spans to a second text that the
+    panel also reads (the submission abstract, the citation report), so nothing
+    outside the manuscript re-identifies the author (audit 2026-09-28 item 3).
+    Emails and ORCID iDs are removed by pattern whatever the manifest holds."""
+    if not text:
+        return text or ""
+    for category in ("author_names", "affiliations", "emails", "orcids"):
+        for s in manifest.get(category) or []:
+            if not isinstance(s, str) or not s.strip():
+                continue
+            text = text.replace(s, "[withheld]")
+            while True:
+                s_idx, e_idx = _flexible_find_bounded(text, s)
+                if s_idx < 0:
+                    break
+                text = text[:s_idx] + "[withheld]" + text[e_idx:]
+    text = _EMAIL_RE.sub("[email withheld]", text)
+    text = _ORCID_RE.sub("[orcid withheld]", text)
+    return text
+
+
 def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
     """Apply gemini-identified spans to the manuscript via string operations.
 
@@ -254,6 +294,19 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
                 continue
             if s in text:
                 text = text.replace(s, "")
+                removed_actual.append(s)
+                continue
+            # PDF extraction wraps lines inside names and affiliations: match the
+            # snippet whitespace-tolerantly and remove every such occurrence
+            # (audit 2026-09-28 item 2).
+            hit = False
+            while True:
+                s_idx, e_idx = _flexible_find_bounded(text, s)
+                if s_idx < 0:
+                    break
+                text = text[:s_idx] + text[e_idx:]
+                hit = True
+            if hit:
                 removed_actual.append(s)
             else:
                 match_failures.append({"category": category, "snippet": s[:120]})
@@ -372,10 +425,30 @@ def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
         manifest["_failure"] = "claude output unparseable"
         return "", manifest
 
+    if not isinstance(spans, dict) or not any(
+            spans.get(k) for k in ("author_names", "affiliations", "emails", "orcids")):
+        # The extraction identified no author spans at all: the panel would read
+        # an un-blinded manuscript. FAIL CLOSED (audit 2026-09-28 item 2).
+        _log("  compaction: extraction identified no author spans; FAILING CLOSED "
+             "(paper withheld from panel)")
+        manifest = dict(_EMPTY_MANIFEST)
+        manifest["_failure"] = "no identity spans identified"
+        return "", manifest
+
     redacted, manifest, match_failures = _apply_removals(paper_text, spans)
 
-    # If nothing was actually removed (every snippet failed to match), flag
-    # it. Otherwise record the metrics + any partial failures.
+    identity_failures = [f for f in match_failures
+                         if f.get("category") in ("author_names", "emails", "orcids")]
+    if identity_failures:
+        # A name, email or ORCID the extractor saw but the text does not contain
+        # verbatim: the manuscript may still carry it in another form. FAIL CLOSED.
+        _log(f"  compaction: {len(identity_failures)} identity span(s) not found in the "
+             f"text; FAILING CLOSED (paper withheld from panel)")
+        manifest["_failure"] = "identity span unmatched"
+        manifest["match_failures"] = match_failures
+        return "", manifest
+
+    # Record the metrics + any partial failures (affiliations, funding, sections).
     if match_failures:
         manifest["match_failures"] = match_failures
     manifest["original_chars"] = len(paper_text)

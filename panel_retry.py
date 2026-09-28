@@ -154,6 +154,13 @@ def classify(state: dict, now: Optional[_dt.datetime] = None) -> tuple[str, str]
         if started and (now - started) >= _dt.timedelta(hours=STUCK_HOURS):
             return "stuck", f"in_review since {state.get('review_started_at')}"
         return "running", str(state.get("review_started_at") or "")
+    if st == "resolving_doi":
+        # A worker that died mid-resolution leaves this state with no queue
+        # marker (audit 2026-09-28 item 19); treated like a stuck review.
+        started = _parse(state.get("resolving_at"))
+        if started and (now - started) >= _dt.timedelta(hours=STUCK_HOURS):
+            return "stuck", f"resolving_doi since {state.get('resolving_at')}"
+        return "running", str(state.get("resolving_at") or "")
     if st in ("awaiting_decision", "completed", "completed_email_failed", "published") or st.startswith("rejected"):
         return "done", st
     return "other", st
@@ -177,7 +184,8 @@ def wait_started(state: dict, kind: str) -> Optional[_dt.datetime]:
     the first pause, else (stuck) the review start. Never the receipt time."""
     return (_parse(state.get("panel_wait_started_at"))
             or _parse(state.get("panel_paused_at"))
-            or (_parse(state.get("review_started_at")) if kind == "stuck" else None))
+            or ((_parse(state.get("review_started_at")) or _parse(state.get("resolving_at")))
+                if kind == "stuck" else None))
 
 
 # ── the tick ──────────────────────────────────────────────────────────────────

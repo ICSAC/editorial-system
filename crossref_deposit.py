@@ -93,18 +93,44 @@ def _sub(parent: ET.Element, tag: str, text: Optional[str] = None,
 
 # ── DOI assignment ─────────────────────────────────────────────────────────────
 
-def _next_seq(seq_file: Path) -> int:
-    """Monotonic per-year sequence, fcntl-locked like the submission counter.
-    Flushed + fsynced BEFORE the lock is released (audit 2026-09-27 item 6: the old order
-    unlocked with the write still buffered). A corrupt counter is refused, not
-    silently reset to zero -- a reset would re-issue suffixes."""
+def _issued_seq_floor(seq_file: Path, year: int) -> int:
+    """Highest sequence already issued for `year`, read from every
+    <submission>/crossref/doi.json beside the counter. The counter stays the
+    source of truth; this floor only stops a lost or empty counter file from
+    re-issuing a suffix that is already on disk (audit 2026-09-28 item 1: the
+    live counter file was missing while icsac.2026.001 existed)."""
+    root = seq_file.parent
+    pattern = str(_cfg("CROSSREF_DOI_SUFFIX", "icsac.{year}.{seq:03d}"))
+    prefix = pattern.split("{year}")[0]
+    floor = 0
+    try:
+        for p in root.glob("*/crossref/doi.json"):
+            try:
+                doi = str(json.loads(p.read_text()).get("doi", ""))
+            except Exception:
+                continue
+            m = re.search(re.escape(prefix) + str(year) + r"\.(\d+)$", doi)
+            if m:
+                floor = max(floor, int(m.group(1)))
+    except Exception:
+        pass
+    return floor
+
+
+def _next_seq(seq_file: Path, year: Optional[int] = None) -> int:
+    """Monotonic per-year sequence. The counter is rewritten by atomic replace
+    under a separate lock file, so a crash can never leave it empty (the old
+    truncate-then-write left a window in which the next caller read an empty
+    file and restarted at 1; audit 2026-09-28 item 1). A corrupt counter is
+    refused, not reset. The sequence never falls below the highest suffix
+    already recorded in a doi.json for that year."""
     seq_file.parent.mkdir(parents=True, exist_ok=True)
-    year = _dt.date.today().year
-    with open(seq_file, "a+") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+    year = int(year or _dt.date.today().year)
+    lock_path = seq_file.with_name(seq_file.name + ".lock")
+    with open(lock_path, "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            fh.seek(0)
-            raw = fh.read().strip()
+            raw = seq_file.read_text().strip() if seq_file.exists() else ""
             if raw:
                 try:
                     state = json.loads(raw)
@@ -113,13 +139,26 @@ def _next_seq(seq_file: Path) -> int:
                                         f"refusing to reset it -- repair by hand")
             else:
                 state = {}
-            seq = int(state.get(str(year), 0)) + 1
+            current = int(state.get(str(year), 0))
+            floor = _issued_seq_floor(seq_file, year)
+            if floor > current:
+                print(f"  crossref: DOI counter for {year} reads {current} but {floor} is already "
+                      f"issued on disk; continuing from {floor}", file=sys.stderr)
+                current = floor
+            seq = current + 1
             state[str(year)] = seq
-            fh.seek(0); fh.truncate()
-            fh.write(json.dumps(state))
-            fh.flush(); os.fsync(fh.fileno())
+            tmp = seq_file.with_name(f"{seq_file.name}.tmp-{os.getpid()}")
+            with open(tmp, "w") as fh:
+                fh.write(json.dumps(state))
+                fh.flush(); os.fsync(fh.fileno())
+            os.replace(tmp, seq_file)
+            dir_fd = os.open(str(seq_file.parent), os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            fcntl.flock(lock, fcntl.LOCK_UN)
     return seq
 
 
@@ -149,9 +188,9 @@ def assign_doi(sub_dir: Path, *, explicit: Optional[str] = None) -> str:
         pattern = _cfg("CROSSREF_DOI_SUFFIX", "icsac.{year}.{seq:03d}")
         seq_file = Path(_cfg("CROSSREF_SEQ_FILE",
                              os.path.expanduser("~/icsac-submissions/.doi-seq")))
-        seq = _next_seq(seq_file)
-        doi = f"{prefix}/" + pattern.format(year=_dt.date.today().year, seq=seq,
-                                             sub_id=sub_dir.name)
+        year = _dt.date.today().year      # one clock read for the counter and the suffix (item 20)
+        seq = _next_seq(seq_file, year)
+        doi = f"{prefix}/" + pattern.format(year=year, seq=seq, sub_id=sub_dir.name)
     if not re.fullmatch(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", doi):
         raise CrossrefError(f"DOI {doi!r} is not well-formed")
     cr_dir.mkdir(parents=True, exist_ok=True)
@@ -492,12 +531,25 @@ def stage(sub_dir: Path, submission: Optional[dict] = None, *,
     validate_xml(xml_bytes)  # raises -> nothing written
     target.mkdir(parents=True, exist_ok=True)
     xml_path = target / "deposit.xml"
+    staged_p = target / "staged.json"
+    # A re-stage on registration day must not erase the checkpoints of a
+    # registration already in flight (audit 2026-09-28 item 7).
+    carried: dict = {}
+    if staged_p.exists():
+        try:
+            prior = json.loads(staged_p.read_text())
+            carried = {k: prior[k] for k in ("checkpoints", "last_test", "registered", "registered_at")
+                       if k in prior}
+        except Exception:
+            carried = {}
     xml_path.write_bytes(xml_bytes)
-    (target / "staged.json").write_text(json.dumps({
+    record = {
         "doi": doi, "landing_url": landing, "pdf_url": pdf_url,
         "content_type": content_type or _cfg("CROSSREF_CONTENT_TYPE", "journal-article"),
         "staged_at": _now_iso(), "registered": False,
-    }, indent=2) + "\n")
+    }
+    record.update(carried)
+    staged_p.write_text(json.dumps(record, indent=2, default=str) + "\n")
     log(f"  crossref: staged draft for {sub_id} -> {xml_path} (doi {doi}, {len(xml_bytes)} bytes, schema OK)")
     return {"doi": doi, "xml_path": str(xml_path), "landing_url": landing,
             "pdf_url": pdf_url,
@@ -661,28 +713,52 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
     ck = staged.setdefault("checkpoints", {})
     outcome = {"doi": doi, "live": True, "resumed": bool(ck)}
     try:
-        # 1. fresh XML for registration day (skip once Crossref has it)
-        if not ck.get("crossref_registered_at"):
+        # 1. fresh XML for registration day. Skipped once a deposit is in flight
+        #    or Crossref has it: the XML on disk must stay the one that was sent.
+        if not ck.get("crossref_registered_at") and not ck.get("crossref_batch_id"):
             stage(sub_dir, submission, doi=doi, log=log)
             staged = json.loads(staged_p.read_text()); ck = staged.setdefault("checkpoints", {})
         xml_bytes = xml_path.read_bytes()
         validate_xml(xml_bytes)
 
-        # 2. Crossref
+        # 2. Crossref. A batch that was deposited but never confirmed (the poll
+        #    failed or timed out) is polled again before anything is re-sent
+        #    (audit 2026-09-28 item 7).
         if not ck.get("crossref_registered_at"):
-            batch_id = deposit(xml_bytes, live=True, filename=f"{sub_dir.name}.xml", log=log)
-            ck["crossref_batch_id"] = batch_id; ck["crossref_deposited_at"] = _now_iso(); _save_staged()
-            result = poll_result(batch_id, live=True, expect_doi=doi, log=log)
+            result = None
+            prior_batch = ck.get("crossref_batch_id")
+            if prior_batch:
+                log(f"  crossref: batch {prior_batch} deposited at {ck.get('crossref_deposited_at')} "
+                    f"but never confirmed; polling it again before any re-deposit")
+                try:
+                    result = poll_result(prior_batch, live=True, expect_doi=doi, log=log)
+                except CrossrefError as exc:
+                    log(f"  crossref: earlier batch {prior_batch} did not confirm ({str(exc)[:160]}); "
+                        f"re-staging and re-depositing")
+                    ck.setdefault("superseded_batches", []).append(prior_batch)
+                    ck.pop("crossref_batch_id", None); ck.pop("crossref_deposited_at", None)
+                    _save_staged()
+                    stage(sub_dir, submission, doi=doi, log=log)
+                    staged = json.loads(staged_p.read_text()); ck = staged.setdefault("checkpoints", {})
+                    xml_bytes = xml_path.read_bytes()
+                    validate_xml(xml_bytes)
+            if result is None:
+                batch_id = deposit(xml_bytes, live=True, filename=f"{sub_dir.name}.xml", log=log)
+                ck["crossref_batch_id"] = batch_id; ck["crossref_deposited_at"] = _now_iso(); _save_staged()
+                result = poll_result(batch_id, live=True, expect_doi=doi, log=log)
             ck["crossref_registered_at"] = _now_iso(); ck["crossref_result"] = result
             staged["registered"] = True; staged["registered_at"] = ck["crossref_registered_at"]
             _save_staged()
-            state.update({"deposit_doi": doi, "deposit_url": f"https://doi.org/{doi}",
-                          "crossref_registered_at": ck["crossref_registered_at"],
-                          "crossref_batch_id": batch_id, "registrar": "crossref"})
-            state_p.write_text(json.dumps(state, indent=2))
         else:
             log(f"  crossref: {doi} already registered at {ck['crossref_registered_at']} "
                 f"(batch {ck.get('crossref_batch_id')}); resuming")
+        # The submission record mirrors the checkpoint on every run, so a crash
+        # between the two writes cannot leave it unregistered forever (item 8).
+        if state.get("crossref_registered_at") != ck["crossref_registered_at"]:
+            state.update({"deposit_doi": doi, "deposit_url": f"https://doi.org/{doi}",
+                          "crossref_registered_at": ck["crossref_registered_at"],
+                          "crossref_batch_id": ck.get("crossref_batch_id"), "registrar": "crossref"})
+            state_p.write_text(json.dumps(state, indent=2))
         outcome["batch_id"] = ck.get("crossref_batch_id")
 
         # 3. landing page
@@ -818,6 +894,12 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
             extra.append(str(dest))
     review_md, rqc_md = publications.stage_public_review_for_slug(
         sub_id, entry["slug"], config.REVIEWS_DIR)   # (review_key, slug, dir) -- same call as publish_watcher
+    # The public review record travels in the same commit as the registry entry;
+    # it was written to disk but never added (audit 2026-09-28 item 9).
+    extra.extend(p for p in (review_md, rqc_md) if p)
+    if not review_md:
+        log(f"  crossref: WARNING no public review record staged for {sub_id}; "
+            f"the landing page will show none")
     publications.commit_and_push(message=f"publications: {entry['title']} ({entry['slug']}) — {doi}",
                                  extra_paths=extra or None)
     state_p = sub_dir / "state.json"

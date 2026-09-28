@@ -20,6 +20,7 @@ Recommendation handling:
 from __future__ import annotations
 
 import datetime
+import fcntl
 import hashlib
 import json
 import os
@@ -691,6 +692,30 @@ def _register_doi_accept(sub_id: str, sub_dir: Path,
 
 
 def process(sub_id: str) -> None:
+    """One worker per submission: a second worker (a manual run beside the
+    service, a re-queue racing a live run) skips instead of overwriting state
+    and reviews (audit 2026-09-28 item 11)."""
+    sub_dir, _tier = _resolve_sub_dir(sub_id)
+    if not sub_dir.is_dir():
+        print(f"  no such submission dir: {sub_dir}", file=sys.stderr)
+        return
+    lock_fh = open(sub_dir / ".worker.lock", "a+")
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        _log(f"  {sub_id}: another worker holds the lock; skipping this run")
+        lock_fh.close()
+        return
+    try:
+        _process_locked(sub_id)
+    finally:
+        try:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+        finally:
+            lock_fh.close()
+
+
+def _process_locked(sub_id: str) -> None:
     sub_dir, tier = _resolve_sub_dir(sub_id)
     if not sub_dir.is_dir():
         print(f"  no such submission dir: {sub_dir}", file=sys.stderr)
