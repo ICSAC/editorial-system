@@ -1372,6 +1372,20 @@ async def api_approve_record(request: Request):
     except Exception:
         raise HTTPException(404, "no such approval link")
     test_mode = author_approval.is_test(sub_dir.name)
+    # The link identifies the paper; the person is the ORCID session the site's
+    # proxy verified and signed into the body (2026-09-28). Test records accept
+    # any whitelisted test ORCID: their stored ORCID is a tier token.
+    session_orcid = _normalize_orcid(str(d.get("orcid") or ""))
+    if not session_orcid:
+        raise HTTPException(401, "Sign in with the ORCID iD you submitted with, then respond again.")
+    try:
+        sub_rec = json.loads((sub_dir / "submission.json").read_text())
+    except Exception:
+        sub_rec = {}
+    expected = _normalize_orcid(str((sub_rec.get("form") or {}).get("orcid") or ""))
+    person_ok = is_test_submission(session_orcid) if test_mode else (bool(expected) and session_orcid == expected)
+    if not person_ok:
+        raise HTTPException(403, "This response must come from the ORCID iD the paper was submitted with.")
     try:
         excl = d.get("exclusions") or []
         if not isinstance(excl, list) or len(excl) > 20:

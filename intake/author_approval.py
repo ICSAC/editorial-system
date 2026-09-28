@@ -178,6 +178,9 @@ def public_view(sub_dir: Path, rec: dict) -> dict:
     return {
         "sub_id": Path(sub_dir).name,
         "test_mode": is_test(Path(sub_dir).name),
+        # The page compares the signed-in ORCID with this before it enables the
+        # buttons; test records carry a tier token, not an ORCID, so they send "".
+        "submitter_orcid": "" if is_test(Path(sub_dir).name) else str((sub.get("form") or {}).get("orcid") or ""),
         "title": sub.get("title") or "",
         "author_display": author,
         "reserved_doi": st.get("crossref_doi") or "",

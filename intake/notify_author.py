@@ -129,6 +129,13 @@ def _md_to_pdf_bytes(md_text: str, *, doc_title: str | None = None,
         if end != -1:
             body_md = body_md[end + 4:].lstrip("\n")
     inner = _md_lib.markdown(body_md, extensions=["extra", "sane_lists", "tables"])
+    # Print has no rows to expand: open every reviewer block and say so
+    # (the web record keeps its collapsed rows).
+    inner = inner.replace("<details", "<details open")
+    inner = re.sub(r"Individual reviewer assessments are collapsed by default\.\s*Expand any row to read that "
+                   r"reviewer.s summary\s*and per-dimension justification\.",
+                   "Individual reviewer assessments follow, one per reviewer, each with its summary and "
+                   "per-dimension justification.", inner)
     title_html = f"<title>{doc_title}</title>" if doc_title else ""
     full = (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
