@@ -203,7 +203,7 @@ def main(argv: list[str]) -> int:
             and not state_pre.get("deposit_record_id")):
         try:
             import repository_deposit as zenodo_deposit
-            # ANY test-tier submission goes to the sandbox (a second model I7: a test record
+            # ANY test-tier submission goes to the sandbox (audit 2026-09-27 item 7: a test record
             # missing its tier field used to fall through to production Zenodo).
             sandbox = bool(test_mode)
             draft = zenodo_deposit.stage_deposit_draft(
