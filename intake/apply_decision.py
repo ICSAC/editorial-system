@@ -391,6 +391,13 @@ def main(argv: list[str]) -> int:
             print(f"curator draft-ready ping failed: {exc}", file=sys.stderr)
 
     state = dict(state_pre)
+    # author_approval.issue() wrote the window to disk after state_pre was read;
+    # carry those two fields so the final write does not erase them (found in
+    # the 2026-09-28 rehearsal: the record was right, the mirror was empty).
+    on_disk = json.loads(state_path.read_text()) if state_path.exists() else {}
+    for k in ("author_approval_status", "author_window_deadline"):
+        if k in on_disk:
+            state[k] = on_disk[k]
     state.update({
         "state": "completed" if ok else "completed_email_failed",
         "completed_at": _now_iso(),
