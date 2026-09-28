@@ -10,7 +10,7 @@ The landing page above carries:
 - A direct citation reference
 - A community signup link
 
-ICSAC's review process is open and transparent. Reviews are published alongside acceptance for accountability; AI tooling helps the panel draft and structure each review while final acceptance decisions rest with human curators.
+ICSAC's review process is open and transparent. Reviews are published alongside acceptance for accountability; AI tooling helps the panel draft and structure each review while final acceptance decisions rest with the curation team.
 
 Welcome to the community.
 
