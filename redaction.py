@@ -30,6 +30,11 @@ from dataclasses import dataclass, field
 FORBIDDEN_VENDOR_TOKENS: tuple[str, ...] = (
     # Infrastructure names — never appear in legitimate academic prose.
     "openrouter",
+    # direct-provider labels from `oai|` panel entries (2026-09-28)
+    "sambanova",
+    "deepinfra",
+    "mistral-large",
+    "mistral-medium",
     "anthropic",
     # OpenRouter route prefixes — the "/" guarantees a path, not a word.
     "openai/",

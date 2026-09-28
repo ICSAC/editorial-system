@@ -575,11 +575,80 @@ def run_hf_router_review(prompt: str, hf_model: str, capture_path: str = None) -
     return result
 
 
+def run_oai_compat_review(prompt: str, provider: str, model: str, capture_path: str = None) -> dict:
+    """Run review against an OpenAI-compatible provider called DIRECTLY with our
+    own key (2026-09-28): `oai|<provider>|<model>` panel entries. Providers and
+    their key variables live in config.OAI_COMPAT_PROVIDERS. Free tiers are the
+    point (SambaNova, Mistral); a missing key returns an error the chain steps
+    past, so a roster can carry the entry before the key exists."""
+    import urllib.request, urllib.error, json as _json
+    spec = (getattr(config, "OAI_COMPAT_PROVIDERS", None) or {}).get(provider) or {}
+    label = f"{provider}:{model}"
+    if not spec.get("base_url"):
+        return {"error": f"unknown provider {provider!r} (config.OAI_COMPAT_PROVIDERS)", "model": label}
+    key_env = spec.get("key_env", "")
+    api_key = ""
+    if key_env:
+        api_key = os.environ.get(key_env, "") or str(getattr(config, key_env, "") or "")
+    if not api_key:
+        return {"error": f"{key_env or 'key'} not set", "model": label}
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 4000,
+    }
+    req = urllib.request.Request(spec["base_url"].rstrip("/") + "/chat/completions",
+                                 data=_json.dumps(payload).encode())
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "icsac-editorial-system/1.0 (info@icsacinstitute.org)")
+
+    import concurrent.futures as _cf
+    HARD_TIMEOUT = 240
+
+    def _do_call():
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return _json.loads(resp.read().decode())
+
+    ex = _cf.ThreadPoolExecutor(max_workers=1)
+    try:
+        data = ex.submit(_do_call).result(timeout=HARD_TIMEOUT)
+    except _cf.TimeoutError:
+        ex.shutdown(wait=False)
+        return {"error": f"{provider} call exceeded {HARD_TIMEOUT}s wall clock", "model": label}
+    except urllib.error.HTTPError as e:
+        ex.shutdown(wait=False)
+        body = e.read()[:300].decode(errors="replace")
+        return {"error": f"HTTP {e.code}: {body}", "model": label}
+    except Exception as e:
+        ex.shutdown(wait=False)
+        return {"error": str(e), "model": label}
+    ex.shutdown(wait=False)
+
+    if not isinstance(data, dict):
+        return {"error": f"unexpected {provider} response shape", "model": label}
+    if data.get("error"):
+        err = data["error"]
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        return {"error": f"{provider}: {msg}", "model": label}
+    choices = data.get("choices", [])
+    if not choices:
+        return {"error": f"no choices in {provider} response", "model": label}
+    msg = choices[0].get("message") or {}
+    raw = msg.get("content") or msg.get("reasoning_content") or msg.get("reasoning") or ""
+    _write_raw(capture_path, raw, "")
+    result = parse_review_output(raw, label)
+    result["provider_used"] = provider
+    return result
+
+
 def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
     """Walk a panel slot chain, dispatching each entry to HF Router or OR.
 
     Entry format: `"hf|<model>:<provider>"` for HF Router, `"or|<model>"` for
-    OpenRouter direct. Untagged entries are treated as OR for backward
+    OpenRouter direct, `"oai|<provider>|<model>"` for a direct OpenAI-compatible
+    provider with our own key (config.OAI_COMPAT_PROVIDERS; 2026-09-28). Untagged entries are treated as OR for backward
     compatibility with the pre-2026-04-27 config shape. Consecutive OR
     entries are batched into a single OR call (using OR's `models` array up
     to its 3-entry cap) so OR's intra-call fallback still works. HF entries
@@ -633,6 +702,19 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
                 return result
             # Same forensic stderr line for HF entries.
             print(f"      panel-chain hf {model} → {result.get('error', '')[:200]}",
+                  file=_sys.stderr)
+            last_error = result
+        elif kind == "oai":
+            # Direct OpenAI-compatible provider with our own key (free tiers).
+            # Flush any pending OR batch first, same ordering rule as HF entries.
+            success = _flush_or()
+            if success:
+                return success
+            prov, _, mdl = model.partition("|")
+            result = run_oai_compat_review(prompt, prov, mdl, capture_path=capture_path)
+            if "error" not in result:
+                return result
+            print(f"      panel-chain oai {prov}|{mdl} → {result.get('error', '')[:200]}",
                   file=_sys.stderr)
             last_error = result
         elif kind == "gemini":
