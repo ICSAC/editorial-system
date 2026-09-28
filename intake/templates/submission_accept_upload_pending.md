@@ -31,7 +31,7 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 
 ## Your response
 
-Open your personal link to approve publication. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
+Open your personal link to approve publication. The page asks you to sign in with the ORCID iD you submitted with; the link and that sign-in together are your signature. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
 
 **{{approval_url}}**
 
