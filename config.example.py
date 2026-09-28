@@ -187,23 +187,32 @@ SITE_BASE_URL = "https://icsacinstitute.org"
 # Suffix pattern; fields: {year} {seq} {sub_id}. seq is per-year, persisted in
 # CROSSREF_SEQ_FILE. Drafts can be re-staged under a new pattern for free;
 # a registered DOI cannot be changed.
-# Venue-neutral on purpose: a paper is published by the Institute at acceptance;
-# selection for the Persistence volume happens later and is not guaranteed.
+# The suffix is the Institute's, not the journal's: the journal lives in the
+# deposit metadata (journal_metadata + the volume block below), so the DOI
+# string never changes if the serial is ever renamed or split.
 CROSSREF_DOI_SUFFIX = os.environ.get("CROSSREF_DOI_SUFFIX", "icsac.{year}.{seq:03d}")
 CROSSREF_SEQ_FILE = os.environ.get("CROSSREF_SEQ_FILE",
                                    os.path.expanduser("~/icsac-submissions/.doi-seq"))
-# "report-paper" (DEFAULT, 2026-09-27 evening): a peer-reviewed paper published by
-#   the Institute, explicit <publisher> = ICSAC; OpenAlex type "report". Chosen
-#   because inclusion in Persistence is a later, curated, non-guaranteed step, so
-#   the record must not claim that venue at acceptance. A selected paper keeps
-#   this DOI; the Persistence volume gets its own DOI as a book.
-# "journal-article": only for content that IS in a titled serial at deposit time
-#   (CROSSREF_JOURNAL_TITLE); OpenAlex "article" once an ISSN is attached.
+# "journal-article" (DEFAULT since 2026-09-28): Persistence is the journal of
+#   record, published online at icsacinstitute.org. Every accepted paper is an
+#   article of the open volume from the day its DOI registers; the paperback and
+#   ebook are that volume's annual edition (print inclusion is not guaranteed;
+#   policy at /journal#how-it-works). The print date and pages are added later by
+#   redepositing the same DOI. OpenAlex reads "article" once an ISSN is attached.
+# "report-paper": a paper the Institute publishes outside the journal
+#   (explicit <publisher> = ICSAC; OpenAlex type "report").
 # "posted_content": Crossref's preprint class (OpenAlex labels it "preprint").
-CROSSREF_CONTENT_TYPE = os.environ.get("CROSSREF_CONTENT_TYPE", "report-paper")
+CROSSREF_CONTENT_TYPE = os.environ.get("CROSSREF_CONTENT_TYPE", "journal-article")
 CROSSREF_JOURNAL_TITLE = "Persistence"
 CROSSREF_JOURNAL_ABBREV = ""            # none registered yet
 CROSSREF_JOURNAL_ISSN = os.environ.get("CROSSREF_JOURNAL_ISSN", "")   # eISSN pending (LoC refile >= 2026-11-12)
+# The open volume: everything accepted until a volume's print cutoff is deposited
+# as an article of it. Bump BOTH by hand when the next volume opens (Volume 1
+# closes with the May 2027 edition). The year is the volume's online year: the
+# schema requires a date on the volume block; the print date comes at redeposit.
+# An empty CROSSREF_JOURNAL_VOLUME omits the volume block entirely.
+CROSSREF_JOURNAL_VOLUME = os.environ.get("CROSSREF_JOURNAL_VOLUME", "1")
+CROSSREF_JOURNAL_VOLUME_YEAR = os.environ.get("CROSSREF_JOURNAL_VOLUME_YEAR", "2026")
 CROSSREF_POSTED_TYPE = "other"          # only used for posted_content
 CROSSREF_DEPOSITOR_NAME = "ICSAC"
 CROSSREF_DEPOSITOR_EMAIL = "help@icsacinstitute.org"

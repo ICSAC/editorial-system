@@ -20,10 +20,12 @@ processed, so the draft lives HERE, in two steps:
                                  submission log until every record reads Success
                                  -> state.json -> author "published" email.
 
-Content type is config.CROSSREF_CONTENT_TYPE: "report-paper" (default; carries
-an explicit <publisher>, which downstream indexes read as ICSAC) or
-"posted_content" (Crossref's preprint/working-paper class -- OpenAlex labels
-those "preprint", which is why it is not the default).
+Content type is config.CROSSREF_CONTENT_TYPE: "journal-article" (default since
+2026-09-28: an article of Persistence, the Institute's journal of record, in the
+open volume from registration day; the print edition is added by redeposit),
+"report-paper" (a paper the Institute publishes outside the journal; carries an
+explicit <publisher>) or "posted_content" (Crossref's preprint/working-paper
+class -- OpenAlex labels those "preprint").
 
 urllib + xml.etree only, matching the rest of the pipeline; lxml is used for
 schema validation at stage time (fail closed: an invalid deposit never lands
@@ -308,7 +310,7 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
                       acceptance_date: Optional[_dt.date] = None,
                       batch_id: Optional[str] = None) -> bytes:
     """Serialise one Crossref deposit for one paper. Pure: no I/O."""
-    content_type = content_type or _cfg("CROSSREF_CONTENT_TYPE", "report-paper")
+    content_type = content_type or _cfg("CROSSREF_CONTENT_TYPE", "journal-article")
     pub_date = publication_date or _dt.date.today()
     title = " ".join((submission.get("title") or "").split())
     if not title:
@@ -347,13 +349,15 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
         _doi_data(md, doi, landing_url, pdf_url)
         _citations(md, citations or [])
     elif content_type == "journal-article":
-        # Persistence: ICSAC's annual peer-reviewed journal (Vol 1 No 1 May 2027,
-        # paperback + ebook), which compiles the year's accepted papers. Papers
-        # publish ONLINE FIRST at icsacinstitute.org on registration; the print
-        # appearance is added later by redepositing the same DOI with a print
-        # date, volume and pages. The eISSN is pending (LoC refile >= 2026-11-12;
-        # "ISSN Pending" explicitly allowed) -- journal_metadata without an ISSN
-        # is schema-valid and accepted; add CROSSREF_JOURNAL_ISSN when issued.
+        # Persistence is the journal of record, published online at
+        # icsacinstitute.org: every accepted paper is an article of the open
+        # volume from registration day (publication_date media_type=online).
+        # The paperback and ebook are the volume's annual edition; the print
+        # date and pages are added later by redepositing the same DOI. The
+        # eISSN is pending (LoC refile >= 2026-11-12; "ISSN Pending" explicitly
+        # allowed) -- journal_metadata without an ISSN is schema-valid; add
+        # CROSSREF_JOURNAL_ISSN when issued. Schema order is fixed:
+        # journal_metadata, journal_issue (the volume), journal_article.
         jr = _sub(body, "journal")
         jm = _sub(jr, "journal_metadata", attrib={"language": "en"})
         _sub(jm, "full_title", _cfg("CROSSREF_JOURNAL_TITLE", "Persistence"))
@@ -363,6 +367,16 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
         issn = _cfg("CROSSREF_JOURNAL_ISSN", "")
         if issn:
             _sub(jm, "issn", issn, attrib={"media_type": "electronic"})
+        volume = str(_cfg("CROSSREF_JOURNAL_VOLUME", "") or "").strip()
+        if volume:
+            # journal_issue requires a publication_date: the volume's online
+            # year from config, else the article's own year.
+            vol_year = str(_cfg("CROSSREF_JOURNAL_VOLUME_YEAR", "") or "").strip()
+            if not (len(vol_year) == 4 and vol_year.isdigit()):
+                vol_year = str(pub_date.year)
+            ji = _sub(jr, "journal_issue")
+            _sub(_sub(ji, "publication_date", attrib={"media_type": "online"}), "year", vol_year)
+            _sub(_sub(ji, "journal_volume"), "volume", volume)
         ja = _sub(jr, "journal_article", attrib={"publication_type": "full_text", "language": "en"})
         _sub(_sub(ja, "titles"), "title", title)
         _contributors(ja, submission)
@@ -481,13 +495,13 @@ def stage(sub_dir: Path, submission: Optional[dict] = None, *,
     xml_path.write_bytes(xml_bytes)
     (target / "staged.json").write_text(json.dumps({
         "doi": doi, "landing_url": landing, "pdf_url": pdf_url,
-        "content_type": content_type or _cfg("CROSSREF_CONTENT_TYPE", "report-paper"),
+        "content_type": content_type or _cfg("CROSSREF_CONTENT_TYPE", "journal-article"),
         "staged_at": _now_iso(), "registered": False,
     }, indent=2) + "\n")
     log(f"  crossref: staged draft for {sub_id} -> {xml_path} (doi {doi}, {len(xml_bytes)} bytes, schema OK)")
     return {"doi": doi, "xml_path": str(xml_path), "landing_url": landing,
             "pdf_url": pdf_url,
-            "content_type": content_type or _cfg("CROSSREF_CONTENT_TYPE", "report-paper")}
+            "content_type": content_type or _cfg("CROSSREF_CONTENT_TYPE", "journal-article")}
 
 
 # ── Register (the irreversible step) ──────────────────────────────────────────
