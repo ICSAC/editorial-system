@@ -127,7 +127,7 @@ this part of the pipeline sends an email or registers anything on its own.
    author's "published" notice. Each step is checkpointed so a failed run
    resumes where it stopped instead of repeating anything.
 4. **One follow-up** ([`intake/post_publication.py`](intake/post_publication.py)),
-   fourteen days after registration: a drafted invitation to join the
+   seven days after registration: a drafted invitation to join the
    institute's reviewer pool. It is skipped when the author opted out of
    newsletters, held, withdrew, or already holds a credential, and it never
    repeats.
@@ -186,7 +186,7 @@ a Python subpackage at [`intake/`](intake/).
 | `intake/submission_worker.py` | Drains the queue, resolves deferred DOIs, dispatches into the review pipeline |
 | `intake/apply_decision.py` | Applies the curator's verdict: publications registration, deposit staging, author email |
 | `intake/author_approval.py` | The author's response page: approve / hold / withdraw, exclusions, quote permission, the objection window |
-| `intake/post_publication.py` | The one post-publication follow-up (reviewer invitation), drafted fourteen days after registration |
+| `intake/post_publication.py` | The one post-publication follow-up (reviewer invitation), drafted seven days after registration |
 | `intake/notify_author.py` | Author email rendering; attaches redacted panel report + RQC as PDFs |
 | `intake/rehydrate.py` | Refetch a stubbed DOI submission's bytes from the resolver, verify SHA |
 | `intake/templates/` | Author-facing email templates |

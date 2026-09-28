@@ -4,7 +4,7 @@ Subject: An invitation from ICSAC — {{icsac_submission_id}}
 
 Your paper, *{{title}}*, has been on the record at icsacinstitute.org since {{published_date}}, with the panel's open review beside it.
 
-We would like to invite you to join the institute as a Reviewer. A Reviewer holds a human seat in the curation process: reviewers adjudicate the cases the panel surfaces and give domain-specific scrutiny on request. There is no fee. The term is one year, renewable.
+We would like to invite you to join the institute as a Reviewer. A Reviewer is the human in the loop: you read the paper and the panel's review of it against a structured checklist, and flag what the panel missed, misread, or over-weighted. There is no fee. The term is one year, renewable.
 
 If that interests you, the application is at [icsacinstitute.org/community/membership-affiliation]({{community_url}}); choose Reviewer on the form. Questions about it: email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with your submission ID in the subject line.
 

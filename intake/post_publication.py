@@ -1,7 +1,7 @@
 """Post-publication follow-up for accepted, registered papers (2026-09-28).
 
 After a paper's DOI is registered (crossref_deposit.register --live) exactly ONE
-follow-up may go to its author, FOLLOWUP_DAYS (default 14) later: an invitation
+follow-up may go to its author, FOLLOWUP_DAYS (default 7) later: an invitation
 to join the Institute as a Reviewer. It is DRAFTED to Gmail for the curation team
 to read and send; this code never sends mail. There is no second follow-up and no
 list behind it: the author is asked once, about this paper.
@@ -60,7 +60,7 @@ AUDIT_LOG = Path(getattr(config, "REVIEWS_DIR", _REPO_ROOT / "reviews")) / "audi
 TEST_AUDIT_LOG = Path(getattr(config, "REVIEWS_DIR", _REPO_ROOT / "reviews")) / "audit-log-test.jsonl"
 
 FOLLOWUP_DAYS = int(getattr(config, "FOLLOWUP_DAYS", 0)
-                    or os.environ.get("ICSAC_FOLLOWUP_DAYS", "").strip() or 14)
+                    or os.environ.get("ICSAC_FOLLOWUP_DAYS", "").strip() or 7)
 MAX_DRAFT_ATTEMPTS = 3            # returned failures before the record is closed and the curator is told once
 RESERVATION_STALE = _dt.timedelta(minutes=30)   # older than this with no outcome = a lost draft attempt
 WEBSITE_REPO = (getattr(config, "ICSAC_WEBSITE_REPO", "")

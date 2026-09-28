@@ -155,7 +155,7 @@ OBJECTION_WINDOW_DAYS = int(os.environ.get("ICSAC_OBJECTION_WINDOW_DAYS", "7"))
 # reviewer invitation) is DRAFTED for the curation team. Never sent by code;
 # never repeated; skipped when the author excluded newsletters, held, withdrew,
 # or is already on the website registries. See intake/post_publication.py.
-FOLLOWUP_DAYS = int(os.environ.get("ICSAC_FOLLOWUP_DAYS", "14"))
+FOLLOWUP_DAYS = int(os.environ.get("ICSAC_FOLLOWUP_DAYS", "7"))
 
 SITE_BASE_URL = "https://icsacinstitute.org"
 # Suffix pattern; fields: {year} {seq} {sub_id}. seq is per-year, persisted in
