@@ -79,9 +79,11 @@ internal contract between the two halves. The other helpers in
 
 ## A note to authors
 
-Every field on the form lands here. `submission.json` records: name, email,
-ORCID, license choice, deposit consent (upload route), and the manuscript
-reference. No other fields are collected. The PDF (for upload submissions)
+Every field on the form lands here. `submission.json` records: the submitter's
+name, email and ORCID; the confirmations ticked on the form; the paper's title,
+abstract, authors, keywords, funding and related identifiers; the license choice;
+deposit consent (upload route); the code and data answer and link; and the
+manuscript reference. No other fields are collected. The PDF (for upload submissions)
 is kept as the archive of record. For DOI submissions, the manuscript bytes
 are lazy-rehydratable from the resolver, and only a SHA-anchored stub is
 kept locally after review completes.

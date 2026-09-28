@@ -259,8 +259,8 @@ to fork, adapt, and use as the basis for your own institute's review system.
 
 If your paper was reviewed by this system and you disagree with the panel's
 recommendation: write to `help@icsacinstitute.org` with your submission ID in
-the subject line. The curation team reads every appeal. The panel is not the last word — it is a thorough first pass that the
-curator turns into the verdict, and that the editor overrides on appeal.
+the subject line. The panel's recommendation is a first pass: the curation team
+makes every decision and reads every appeal.
 
 If your paper was accepted: the redacted review is published at
 `icsacinstitute.org/publications/` alongside the work itself, and you decide
