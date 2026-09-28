@@ -67,6 +67,7 @@ try:
         "authors": ["A. Author"], "doi": "10.5281/zenodo.1", "accepted_date": "2026-04-01",
         "source": "zenodo-community", "ssrn_id": "123", "license_url": "https://creativecommons.org/licenses/by/4.0/",
     }]))
+    pub.WEBSITE_REPO = str(tmp)   # the upsert is a no-op without a repo path
     pub.REGISTRY_PATH = str(reg)
     out = pub.upsert_entry({"title": "Old paper", "authors": ["A. Author"], "doi": "10.5281/zenodo.1",
                             "source": "zenodo-community", "promotion_opt_out": True})
