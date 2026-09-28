@@ -168,6 +168,14 @@ def main(argv: list[str]) -> int:
             code_link_claims = []
 
     panel_md, rqc_md = worker._scrubbed_report_pair(sub_id, title, tier=tier)
+    # The acceptance email attaches the panel report and the record publishes it:
+    # an accept with none (the panel never ran, e.g. right after a code-check
+    # override, or the redaction gate dropped it) waits (audit 2026-09-28).
+    if verdict == "accept" and not panel_md.strip() and not force:
+        print(f"{sub_id} has no publishable panel report (not reviewed yet, or the redaction "
+              f"gate dropped it: see the curator alert). Nothing done. Decide after the panel, "
+              f"or run with ICSAC_DECISION_FORCE=1 to accept without the report.", file=sys.stderr)
+        return 3
     deposit_doi = state_pre.get("deposit_doi")
     deposit_url = state_pre.get("deposit_url")
 
