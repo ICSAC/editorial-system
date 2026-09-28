@@ -82,8 +82,10 @@ For each submission:
    with the author or published.
 7. **Decision** ([`action.py`](action.py)) — the panel recommends one of three
    outcomes:
-   - **Accept** — published to `icsacinstitute.org/accepted/<id>` with a
-     redacted copy of the panel's review.
+   - **Accept** — a DOI under the institute's own Crossref prefix is
+     registered and the paper is published at
+     `icsacinstitute.org/publications/<slug>` with a redacted copy of the
+     panel's review; an archival copy goes to Zenodo under that same DOI.
    - **Revise and resubmit** — author receives the panel's feedback and may
      resubmit a revised version.
    - **Scope reject** — reserved for submissions that fall outside the
@@ -94,8 +96,44 @@ For each submission:
    recommendation, the full panel report, and the RQC audit are sent to
    the curator via the operator's configured notification channel. The
    curator confirms, modifies, or overrides before any author email is
-   drafted, any publications-registry entry is written, or any Zenodo
-   deposit is staged. The panel never auto-delivers a decision.
+   drafted, any DOI is registered, or any deposit is staged. The panel
+   never auto-delivers a decision.
+
+## After acceptance
+
+Acceptance is where most of the human-in-the-loop machinery lives. Nothing in
+this part of the pipeline sends an email or registers anything on its own.
+
+1. **The curator's accept** (`intake/decide.sh <id> accept`) stages a Crossref
+   deposit draft ([`crossref_deposit.py`](crossref_deposit.py)): a DOI string is
+   reserved under the institute's prefix, the deposit XML is built and validated
+   against the Crossref schema, and nothing is sent. A Zenodo archive draft is
+   staged carrying that same DOI as an external identifier, so Zenodo mints
+   nothing. The acceptance email is written to the operator's mailbox as a
+   draft; the code never sends it.
+2. **The author's response page**
+   ([`intake/author_approval.py`](intake/author_approval.py)) — the acceptance
+   email carries a personal link and a date. On the page the author approves,
+   holds, or withdraws; opts out of any promotion category (social media,
+   print or broadcast, newsletters, website features) or of the annual volume,
+   each all-or-nothing; leaves notes for the curation team; and ticks whether
+   the institute may quote those notes. Every response is timestamped and
+   audited. The window is seven days by default; if it closes in silence the
+   operator is told once. Nothing on the page publishes anything.
+3. **Registration** (`intake/register-doi.sh <id> --live`, run by the operator
+   after a typed confirmation) refuses a hold, a withdrawal, or an open window
+   without an answer, then registers the DOI at Crossref, pushes the landing
+   page, publishes the Zenodo archive under the same DOI, and drafts the
+   author's "published" notice. Each step is checkpointed so a failed run
+   resumes where it stopped instead of repeating anything.
+4. **One follow-up** ([`intake/post_publication.py`](intake/post_publication.py)),
+   fourteen days after registration: a drafted invitation to join the
+   institute's reviewer pool. It is skipped when the author opted out of
+   newsletters, held, withdrew, or already holds a credential, and it never
+   repeats.
+5. **No automated email asks for a reply.** Every choice an author has is a
+   link or a button on the response page; support starts with an email to
+   `help@icsacinstitute.org` carrying the submission ID.
 
 ## What it is not
 
@@ -138,6 +176,7 @@ a Python subpackage at [`intake/`](intake/).
 | `rubrics/` | The editorial rubrics applied to every submission |
 | `templates/` | Editorial-side correspondence templates (Zenodo-comment posts, etc.) |
 | `editorial-batch.{service,timer}`, `editorial-review.{service,timer}`, `submission-watcher.{service,timer}` | systemd units for the batch workflow, community-request poller, and intake/decision watcher |
+| `crossref_deposit.py` | Crossref registration: stages a schema-validated deposit draft at accept; `register --live` is the operator's irreversible, checkpointed step |
 
 ### Submission front-end ([`intake/`](intake/))
 
@@ -146,6 +185,8 @@ a Python subpackage at [`intake/`](intake/).
 | `intake/intake_server.py` | FastAPI app: `POST /api/submit`, `GET /api/submission/{id}/state`, `GET /healthz` |
 | `intake/submission_worker.py` | Drains the queue, resolves deferred DOIs, dispatches into the review pipeline |
 | `intake/apply_decision.py` | Applies the curator's verdict: publications registration, deposit staging, author email |
+| `intake/author_approval.py` | The author's response page: approve / hold / withdraw, exclusions, quote permission, the objection window |
+| `intake/post_publication.py` | The one post-publication follow-up (reviewer invitation), drafted fourteen days after registration |
 | `intake/notify_author.py` | Author email rendering; attaches redacted panel report + RQC as PDFs |
 | `intake/rehydrate.py` | Refetch a stubbed DOI submission's bytes from the resolver, verify SHA |
 | `intake/templates/` | Author-facing email templates |
@@ -198,12 +239,13 @@ to fork, adapt, and use as the basis for your own institute's review system.
 ## A note to authors
 
 If your paper was reviewed by this system and you disagree with the panel's
-recommendation: write to `help@icsacinstitute.org`. A human editor reads every
-appeal. The panel is not the last word — it is a thorough first pass that the
+recommendation: write to `help@icsacinstitute.org` with your submission ID in
+the subject line. A human editor reads every appeal. The panel is not the last word — it is a thorough first pass that the
 curator turns into the verdict, and that the editor overrides on appeal.
 
 If your paper was accepted: the redacted review is published at
-`icsacinstitute.org/accepted/<your-record-id>` alongside the work itself.
+`icsacinstitute.org/publications/` alongside the work itself, and you decide
+on your own response page how the institute may promote it.
 
 If you want to know exactly which prompts the panel saw, which rubrics it
 applied, which citations it verified, and which form fields the submission
