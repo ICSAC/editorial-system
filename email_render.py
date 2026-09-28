@@ -89,7 +89,7 @@ def _share_urls(paper_title: str, share_target_url: str) -> dict:
     """
     share_sentence = (
         f'My paper "{paper_title}" was accepted into the ICSAC Community '
-        f'— open peer review with AI tooling for complexity science.'
+        f'— open review with AI tooling for complexity science.'
     )
     enc_sentence = quote(share_sentence, safe="")
     enc_url = quote(share_target_url, safe="")
