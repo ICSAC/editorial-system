@@ -25,6 +25,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import textwrap
 from datetime import datetime, timezone
 
@@ -373,8 +374,8 @@ def fire_alerts(review_data: dict, rqc: dict, rqc_path: str) -> None:
     try:
         import notify
         notify.send_to_curator(msg, parse_mode=None)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"  rqc: curator ping failed: {exc}", file=sys.stderr)
     url = getattr(config, "NTFY_PAIN_URL", "")
     if url:
         try:
@@ -385,8 +386,8 @@ def fire_alerts(review_data: dict, rqc: dict, rqc_path: str) -> None:
             )
             req.add_header("Title", "ICSAC Pipeline: Review Quality Control Flagged")
             urllib.request.urlopen(req, timeout=5)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"  rqc: pain signal failed: {exc}", file=sys.stderr)
 
 
 def audit_review(review_data: dict, panel_review_md: str) -> tuple[str, dict]:

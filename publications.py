@@ -76,12 +76,24 @@ def _save_registry(registry: list[dict]) -> None:
         f.write("\n")
 
 
+# Optional registry fields the website schema knows. They ride through an
+# upsert untouched (audit 2026-09-28 item 10: they were dropped, sub_id and the
+# licence with them, so a Crossref-path landing page had no PDF link).
+_OPTIONAL_KEYS = (
+    "license_url", "keywords", "canonical_url", "ssrn_id", "ssrn_url", "ssrn_doi",
+    "promotion_opt_out", "promotion_exclusions", "persistence_opt_out",
+)
+
+
 def _match_existing(registry: list[dict], proto: dict) -> Optional[int]:
-    """Find an existing registry entry by record_id then doi. Returns its index or None."""
+    """Find an existing registry entry by record_id, sub_id, then doi. Returns its index or None."""
     rid = proto.get("record_id")
+    sid = proto.get("sub_id")
     doi = proto.get("doi")
     for i, e in enumerate(registry):
         if rid and e.get("record_id") == rid:
+            return i
+        if sid and e.get("sub_id") == sid:
             return i
         if doi and e.get("doi") == doi:
             return i
@@ -122,7 +134,8 @@ def upsert_entry(proto: dict) -> dict:
     registry = _load_registry()
     existing_idx = _match_existing(registry, proto)
 
-    final: dict[str, Any] = {}
+    # Start from the prior record so its optional fields survive an update.
+    final: dict[str, Any] = dict(registry[existing_idx]) if existing_idx is not None else {}
     if existing_idx is not None:
         prior = registry[existing_idx]
         final["slug"] = prior.get("slug") or make_slug(
@@ -143,6 +156,8 @@ def upsert_entry(proto: dict) -> dict:
 
     if proto.get("record_id"):
         final["record_id"] = str(proto["record_id"])
+    if proto.get("sub_id"):
+        final["sub_id"] = str(proto["sub_id"])
     final["title"] = proto["title"]
     final["authors"] = list(proto["authors"])
     final["doi"] = proto["doi"]
@@ -151,13 +166,19 @@ def upsert_entry(proto: dict) -> dict:
         final["source_ref"] = proto["source_ref"]
     if proto.get("abstract"):
         final["abstract"] = proto["abstract"]
+    for key in _OPTIONAL_KEYS:
+        if key in proto and proto[key] not in (None, "", [], {}):
+            final[key] = proto[key]
 
-    # Re-key in canonical insert order so the JSON stays diff-friendly.
+    # Re-key in canonical insert order so the JSON stays diff-friendly; any
+    # field not named here is kept at the end rather than dropped.
     ordered_keys = [
-        "slug", "record_id", "title", "authors", "doi",
-        "accepted_date", "source", "source_ref", "abstract",
+        "slug", "record_id", "sub_id", "title", "authors", "doi",
+        "accepted_date", "source", "source_ref", "abstract", *_OPTIONAL_KEYS,
     ]
     canonical = {k: final[k] for k in ordered_keys if k in final}
+    for k, v in final.items():
+        canonical.setdefault(k, v)
 
     if existing_idx is not None:
         registry[existing_idx] = canonical

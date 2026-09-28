@@ -87,7 +87,8 @@ def _list_awaiting_publish() -> list[Path]:
             continue
         try:
             state = json.loads(state_path.read_text())
-        except Exception:
+        except Exception as exc:
+            print(f"  publish_watcher: {sub_dir.name} state unreadable ({exc}); skipped", file=sys.stderr)
             continue
         if state.get("deposit_record_id") and not state.get("deposit_doi"):
             if state.get("crossref_doi") and not state.get("crossref_registered_at"):
@@ -103,7 +104,9 @@ def _list_awaiting_publish() -> list[Path]:
 def _crossref_path_early_publish_check(sub_dir: Path, state: dict) -> None:
     try:
         dep = _get_deposit(str(state["deposit_record_id"]))
-    except Exception:
+    except Exception as exc:
+        print(f"  publish_watcher: {sub_dir.name} early-publish check could not read Zenodo ({exc})",
+              file=sys.stderr)
         return
     if dep.get("submitted") or dep.get("state") == "done":
         msg = (f"{sub_dir.name}: Zenodo record {state['deposit_record_id']} is PUBLISHED but its "

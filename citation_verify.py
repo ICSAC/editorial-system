@@ -679,7 +679,9 @@ def verify_citation(c: dict) -> dict:
                 and abs(int(c["year"]) - int(r["year"])) <= 1
             )
             if (title_ok and authors_ok) or (title_ok and year_ok) or (authors_ok and year_ok):
-                conf = "title-author-match" if (title_ok and authors_ok) else "title-only-match"
+                conf = ("title-author-match" if (title_ok and authors_ok)
+                        else "title-year-match" if title_ok
+                        else "author-year-match")   # no title agreement: existence only (item 16)
                 out.update({
                     "verified": True,
                     "resolver": r["resolver"],
@@ -724,7 +726,12 @@ def verify_all(citations: list[dict], max_concurrent: int = 8) -> list[dict]:
                     "reason": f"verifier raised: {type(e).__name__}",
                 }
             merged = dict(citations[i])
-            merged.update(v)
+            if merged.get("verified") and not v.get("verified"):
+                # A recheck that could not confirm never downgrades a citation
+                # verified earlier (audit 2026-09-28 item 17).
+                merged["recheck_reason"] = str(v.get("reason", ""))[:200]
+            else:
+                merged.update(v)
             results[i] = merged
     return results
 

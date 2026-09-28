@@ -112,9 +112,15 @@ def is_test(sub_id: str) -> bool:
 
 # ── issue (called by apply_decision at accept) ────────────────────────────────
 
-def issue(sub_dir: Path, *, days: Optional[int] = None) -> dict:
+def issue(sub_dir: Path, *, days: Optional[int] = None, force: bool = False) -> dict:
     """Create the author's link and the window. Returns url, deadline strings."""
     sub_dir = Path(sub_dir)
+    prior = _load(sub_dir)
+    if prior and (prior.get("responses") or prior.get("status") != "pending") and not force:
+        # The author has already answered (or held, or withdrawn); a second accept
+        # must not silently reset that (audit 2026-09-28 item 6).
+        raise RuntimeError(f"{sub_dir.name}: an author response is already on record "
+                           f"(status {prior.get('status')}); refusing to re-issue the window")
     days = int(days or getattr(config, "OBJECTION_WINDOW_DAYS", 7))
     token = secrets.token_urlsafe(24)
     deadline = _now() + _dt.timedelta(days=days)
@@ -262,12 +268,14 @@ def _curator_text(sub_id: str, choice: str, excl: list, note: str, quote_ok: boo
     return f"AUTHOR RESPONSE — {sub_id}\n{body}"
 
 
-def _ping(msg: str) -> None:
+def _ping(msg: str) -> bool:
     try:
         import notify
         notify.send_to_curator(msg, parse_mode=None)
+        return True
     except Exception as exc:
         print(f"  author_approval: curator ping failed: {exc}", file=sys.stderr)
+        return False
 
 
 # ── the window (called by the batch tick) ────────────────────────────────────
@@ -287,12 +295,20 @@ def check_windows(*, now: Optional[_dt.datetime] = None) -> int:
         st = _state(sub_dir)
         if st.get("decision") != "accept" or st.get("crossref_registered_at"):
             continue
-        deadline = _dt.datetime.fromisoformat(rec["deadline"].replace("Z", "+00:00"))
+        try:
+            deadline = _dt.datetime.fromisoformat(rec["deadline"].replace("Z", "+00:00"))
+        except Exception as exc:
+            print(f"  author_approval: {sub_dir.name} has an unreadable deadline ({exc}); skipped",
+                  file=sys.stderr)
+            continue
         if now < deadline:
             continue
-        _ping(f"OBJECTION WINDOW CLOSED — {sub_dir.name}\n"
-              f"Accepted {str(st.get('completed_at', '?'))[:10]}; the author has not responded by "
-              f"{rec['deadline'][:10]}. Your call: intake/register-doi.sh {sub_dir.name} --live")
+        # Marked as pinged only when the ping went out; a failed transport tries
+        # again next tick instead of going silent (audit 2026-09-28 item 21).
+        if not _ping(f"OBJECTION WINDOW CLOSED — {sub_dir.name}\n"
+                     f"Accepted {str(st.get('completed_at', '?'))[:10]}; the author has not responded by "
+                     f"{rec['deadline'][:10]}. Your call: intake/register-doi.sh {sub_dir.name} --live"):
+            continue
         rec["window_closed_pinged"] = True
         rec["window_closed_pinged_at"] = _iso(now)
         _save(sub_dir, rec)
@@ -312,7 +328,15 @@ def gate(sub_dir: Path, *, override_window: bool = False,
     if st.get("withdrawn_by_author") or (rec or {}).get("status") == "withdrawn":
         return False, "the author withdrew this paper"
     if rec is None:
-        return True, "no author window on record (accepted before 2026-09-27)"
+        # Only papers accepted before the response page existed pass without a
+        # record; a newer acceptance with no window is a broken accept, not a
+        # grandfathered one (audit 2026-09-28 item 5).
+        accepted = str(st.get("completed_at") or "")[:10]
+        if accepted and accepted < "2026-09-27":
+            return True, f"no author window on record (accepted {accepted}, before the response page)"
+        return False, (f"no author window on record for an acceptance dated {accepted or 'unknown'}; "
+                       f"re-run intake/decide.sh {sub_dir.name} accept with ICSAC_DECISION_FORCE=1 "
+                       f"to issue one")
     status = rec.get("status", "pending")
     if status == "hold":
         return False, f"the author asked to hold: {str(st.get('author_hold_note', ''))[:200]}"

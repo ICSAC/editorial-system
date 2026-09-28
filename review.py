@@ -666,12 +666,24 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
     last_error = None
     or_batch: list[str] = []
 
+    def _safe(call, label: str) -> dict:
+        # A malformed 200 (choices: [null], a non-string body) must cost one chain
+        # entry, never the whole pass (audit 2026-09-28 item 15).
+        try:
+            result = call()
+        except Exception as exc:
+            print(f"      panel-chain {label} raised {type(exc).__name__}: {str(exc)[:160]}",
+                  file=_sys.stderr)
+            return {"error": f"{label}: {type(exc).__name__}: {str(exc)[:160]}", "model": label}
+        return result if isinstance(result, dict) else {"error": f"{label}: non-dict result", "model": label}
+
     def _flush_or():
         nonlocal or_batch, last_error
         if not or_batch:
             return None
         flush_models = list(or_batch)
-        result = run_openrouter_review(prompt, flush_models, capture_path=capture_path)
+        result = _safe(lambda: run_openrouter_review(prompt, flush_models, capture_path=capture_path),
+                       f"or {flush_models}")
         or_batch = []
         if "error" not in result:
             return result
@@ -697,7 +709,8 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
             success = _flush_or()
             if success:
                 return success
-            result = run_hf_router_review(prompt, model, capture_path=capture_path)
+            result = _safe(lambda: run_hf_router_review(prompt, model, capture_path=capture_path),
+                           f"hf {model}")
             if "error" not in result:
                 return result
             # Same forensic stderr line for HF entries.
@@ -711,7 +724,8 @@ def _run_panel_chain(prompt: str, chain, capture_path: str = None) -> dict:
             if success:
                 return success
             prov, _, mdl = model.partition("|")
-            result = run_oai_compat_review(prompt, prov, mdl, capture_path=capture_path)
+            result = _safe(lambda: run_oai_compat_review(prompt, prov, mdl, capture_path=capture_path),
+                           f"oai {prov}|{mdl}")
             if "error" not in result:
                 return result
             print(f"      panel-chain oai {prov}|{mdl} → {result.get('error', '')[:200]}",
@@ -815,6 +829,20 @@ PROVENANCE_NEGATIVE_INDICATORS = (
 )
 
 
+def _as_score(value) -> int | None:
+    """A rubric score is a whole number. Booleans are not scores, 5.9 is not 5,
+    and "4" is 4 (audit 2026-09-28 item 13)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
 def _validate_review_schema(parsed: dict) -> str | None:
     """Verify the parsed JSON matches the required reviewer schema.
 
@@ -837,9 +865,8 @@ def _validate_review_schema(parsed: dict) -> str | None:
             return f"{dim} is not an object"
         if "score" not in entry:
             return f"{dim} missing score"
-        try:
-            score_int = int(entry["score"])
-        except (TypeError, ValueError):
+        score_int = _as_score(entry["score"])
+        if score_int is None:
             return f"{dim} score is not an integer: {entry['score']!r}"
         if not 1 <= score_int <= 5:
             return f"{dim} score {score_int} out of 1-5 range"
@@ -907,6 +934,7 @@ _CLAUSE_BREAK_RE = re.compile(
     r"|some|several|many|most|a|an)\b"
 )
 _NEGATION_SCOPE_CHARS = 200   # a run-on sentence still cannot negate a paragraph
+_NOT_ONLY_RE = re.compile(r"\bnot\s+(?:only|just|merely|simply)\b", re.IGNORECASE)
 
 
 def _has_unnegated_occurrence(text: str, indicator: str) -> bool:
@@ -927,6 +955,9 @@ def _has_unnegated_occurrence(text: str, indicator: str) -> bool:
         window = text[max(0, idx - _NEGATION_SCOPE_CHARS):idx]
         breaks = list(_CLAUSE_BREAK_RE.finditer(window))
         scan = window[breaks[-1].end():] if breaks else window
+        # "not only padded but also fabricated" asserts both; "not only" is not
+        # a negation (audit 2026-09-28 item 13).
+        scan = _NOT_ONLY_RE.sub(" ", scan)
         if not _NEGATION_RE.search(scan):
             return True  # this occurrence is in positive context
         start = idx + len(indicator)
@@ -966,11 +997,15 @@ def _apply_thresholds(
          curator regardless of how strong other dims are.
       5. REVIEW_FURTHER (default) — curator judgment call.
     """
-    all_means = [v["mean"] for v in dimension_scores.values()]
-    avg_score = round(sum(all_means) / len(all_means), 2) if all_means else 0
+    # Thresholds read the unrounded means; `mean` (one decimal) is for display
+    # (audit 2026-09-28 item 12: rounding moved a 3.48 panel over the 3.5 bar).
+    def _raw(v: dict) -> float:
+        return float(v.get("mean_raw", v.get("mean", 0)))
+    all_means = [_raw(v) for v in dimension_scores.values()]
+    avg_score = (sum(all_means) / len(all_means)) if all_means else 0
     min_score = min(all_means) if all_means else 0
-    provenance_score = dimension_scores.get("ai_provenance_signal", {}).get("mean", 5)
-    domain_fit_score = dimension_scores.get("domain_fit", {}).get("mean", 5)
+    provenance_score = _raw(dimension_scores.get("ai_provenance_signal", {"mean": 5}))
+    domain_fit_score = _raw(dimension_scores.get("domain_fit", {"mean": 5}))
 
     # 1. REJECT — out-of-scope per scope.md. Checked BEFORE R&R so a
     # domain-fit failure with simultaneously low provenance is still routed to
@@ -1032,6 +1067,7 @@ def compute_aggregate(reviews: list[dict]) -> dict:
         if scores:
             dimension_scores[dim] = {
                 "mean": round(sum(scores) / len(scores), 1),
+                "mean_raw": sum(scores) / len(scores),
                 "scores": scores,
             }
 
@@ -1074,6 +1110,7 @@ def compute_aggregate_multipass(pass_results: list[list[dict]]) -> dict:
         if scores:
             dimension_scores[dim] = {
                 "mean": round(sum(scores) / len(scores), 1),
+                "mean_raw": sum(scores) / len(scores),
                 "scores": scores,
             }
 
@@ -1284,7 +1321,10 @@ def _run_slot(prompt, slot_idx, slot, record_id=None, pass_idx=0):
         capture_path = os.path.join(raw_dir, f"pass{pass_idx}_slot{slot_idx}_{model_label}.txt")
     if slot is None:
         print(f"    [slot {slot_idx}] claude...")
-        return run_claude_review(prompt, capture_path=capture_path)
+        try:
+            return run_claude_review(prompt, capture_path=capture_path)
+        except Exception as exc:  # one slot, not the pass (audit 2026-09-28 item 15)
+            return {"error": f"claude: {type(exc).__name__}: {str(exc)[:160]}", "model": "claude"}
     label = slot[0] if isinstance(slot, list) else slot
     print(f"    [slot {slot_idx}] panel:{label}...")
     return _run_panel_chain(prompt, slot, capture_path=capture_path)
@@ -1310,9 +1350,36 @@ def _run_single_pass(prompt: str, slots: list, min_required: int, record_id=None
             print(f"      retry slot {i}...")
             reviews[i] = _run_slot(prompt, i, slots[i], record_id=record_id, pass_idx=pass_idx)
 
+    # One model, one vote per pass: a chain that fell through to a model another
+    # slot already used must not count twice toward the quorum (audit 2026-09-28 item 14).
+    seen_models: set[str] = set()
+    for i, r in enumerate(reviews):
+        if "error" in r:
+            continue
+        ident = _model_identity(r.get("model", ""))
+        if ident and ident in seen_models:
+            print(f"      slot {i}: {r.get('model')} already reviewed this pass; not counted twice")
+            reviews[i] = {"error": f"duplicate model in pass: {r.get('model')}",
+                          "model": r.get("model", "")}
+        elif ident:
+            seen_models.add(ident)
+
     valid = [r for r in reviews if "error" not in r]
     print(f"    pass result: {len(valid)}/{n_slots} succeeded (min required: {min_required})")
     return reviews
+
+
+def _model_identity(label: str) -> str:
+    """'hf|Qwen/Qwen3-235B:deepinfra', 'openrouter:qwen/qwen3-235b:free' and
+    'oai|sambanova|Qwen3-235B' name the same reviewer."""
+    s = (label or "").strip()
+    parts = s.split("|")
+    s = parts[-1] if parts else s
+    if s.startswith(("openrouter:", "hf:")):
+        s = s.split(":", 1)[1]
+    s = s.split(":", 1)[0]
+    s = s.rsplit("/", 1)[-1]
+    return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
 def _run_citation_verify(review_data: dict) -> str:
@@ -1679,8 +1746,13 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     compacted_data["creators"] = [
         {"name": "[author identity withheld for blind review]"}
     ]
-
-    prompt = build_prompt(compacted_data, verification_report=verification_report)
+    # The abstract and the citation report reach the panel too; blind them with
+    # the same spans (audit 2026-09-28 item 3). The originals stay in review_data.
+    compacted_data["description"] = review_compaction.blind_aux_text(
+        compacted_data.get("description", "") or "", compaction_manifest)
+    prompt = build_prompt(compacted_data,
+                          verification_report=review_compaction.blind_aux_text(
+                              verification_report, compaction_manifest))
 
     slots = [None] + list(getattr(config, "OPENROUTER_MODELS", []))
     n_slots = len(slots)
