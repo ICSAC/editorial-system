@@ -273,7 +273,7 @@ why this repository exists.
 
 ## Support this work
 
-ICSAC operates on bootstrap funding and private donations. Open peer review for
+ICSAC operates on bootstrap funding and private donations. Open review for
 independent and heterodox researchers is the kind of infrastructure no one is
 paid to build. If you want to help keep it running:
 

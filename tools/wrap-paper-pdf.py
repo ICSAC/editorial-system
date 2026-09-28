@@ -28,7 +28,7 @@ from pathlib import Path
 import weasyprint
 import pypdf
 
-SITE = Path("/home/orangepi/Desktop/icsac/icsacinstitute.org")
+SITE = Path(os.environ.get("ICSAC_WEBSITE_REPO") or "/home/orangepi/Desktop/icsac/icsacinstitute.org")
 LOGO = SITE / "public" / "logo_trans_ICSAC_notext.png"
 ACCEPTED = SITE / "src" / "data" / "accepted.json"
 OUT_DIR = SITE / "public" / "papers"
@@ -270,7 +270,7 @@ def _render_cover(paper: dict) -> bytes:
   </dl>
 
   <div class="venue">
-    <strong>Peer-reviewed by ICSAC</strong> &mdash; the Institute's open editorial record. The full record &mdash; AI panel reviews, Review Quality Control audit, and curator verdict &mdash; is publicly available at the URL below.
+    <strong>Reviewed by the ICSAC panel</strong> &mdash; the Institute's open editorial record. The full record &mdash; AI panel reviews, Review Quality Control audit, and curator verdict &mdash; is publicly available at the URL below.
   </div>
 
   <div class="record">
