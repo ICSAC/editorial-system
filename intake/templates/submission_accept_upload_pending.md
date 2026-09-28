@@ -13,6 +13,16 @@ Two PDFs are attached: the full panel report ({{review_pdf_name}}) and the Revie
 
 {{curator_note}}
 
+## Your response, by {{objection_deadline}}
+
+One action is needed from you.
+
+Open your personal link to approve publication. The page asks you to sign in with the ORCID iD you submitted with; the link and that sign-in together are your signature. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
+
+**{{approval_url}}**
+
+If we have not heard from you by **{{objection_deadline}}**, we proceed with publication. After the DOI is registered the record is permanent and changes are made by published correction. If the page does not work for you, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with your submission ID in the subject line.
+
 ## What happens next
 
 1. We register a DOI for your paper under the institute's own prefix and publish it in *Persistence*, the institute's journal, online first at icsacinstitute.org, with the panel's open review record alongside it. You will receive a second email with the DOI and the links once both are live. Nothing is needed from you.
@@ -28,14 +38,6 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 - We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the annual print and ebook edition of *Persistence*, on your response page.
 - You will be listed as **{{author_display}}**{{affiliation_line}}.
 - We take it that this paper has no other DOI and is not under review elsewhere, as confirmed at submission.
-
-## Your response
-
-Open your personal link to approve publication. The page asks you to sign in with the ORCID iD you submitted with; the link and that sign-in together are your signature. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
-
-**{{approval_url}}**
-
-If we have not heard from you by **{{objection_deadline}}**, we proceed with publication. After the DOI is registered the record is permanent and changes are made by published correction. If the page does not work for you, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with your submission ID in the subject line.
 
 ## About this review
 
