@@ -31,7 +31,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -360,9 +360,36 @@ def _validate_submitter(d: dict) -> dict:
 RESOURCE_TYPES = {"preprint", "article", "report", "dataset", "software", "other"}
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RELATION_TYPES = {
-    "isSupplementTo", "isPreviousVersionOf", "isNewVersionOf",
+    "isSupplementTo", "isSupplementedBy", "isPreviousVersionOf", "isNewVersionOf",
     "isDerivedFrom", "isPartOf", "cites", "references", "isDocumentedBy",
 }
+
+
+def _parse_code_data(available_raw, url_raw) -> dict:
+    """The form's code and data question (2026-09-28): does the paper say code
+    or data is available, and if so, where. ICSAC links to it and never hosts
+    it. An absent answer comes from an older form; the worker's claim check
+    still reads the paper. "yes" needs a public http(s) link; "no" drops any
+    link that came with it.
+    """
+    answer = (available_raw if isinstance(available_raw, str) else "").strip().lower()
+    url = (url_raw if isinstance(url_raw, str) else "").strip()
+    if answer not in ("", "yes", "no"):
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": ["code_data_available must be yes or no"]})
+    if answer == "no":
+        return {"available": False, "url": None}
+    if not url:
+        if answer == "yes":
+            raise HTTPException(400, {"error": "validation_failed",
+                                      "details": ["a link to your code and data is required when your paper says they are available"]})
+        return {"available": None, "url": None}
+    parsed = urlparse(url)
+    if (len(url) > 500 or parsed.scheme not in ("http", "https") or "." not in parsed.netloc
+            or any(ch.isspace() for ch in url) or "@" in parsed.netloc):
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": ["the code and data link must be a public http(s) address of at most 500 characters"]})
+    return {"available": True if answer == "yes" else None, "url": url}
 
 
 def _parse_creators(raw: str) -> list[dict]:
@@ -679,7 +706,7 @@ def handle_test_submission(submitter: dict, auth_orcid: str,
 
 async def handle_test_pipeline_submission(
     *, tier: int, request: Request, form, submitter: dict,
-    auth_orcid: str, auth_name: str,
+    auth_orcid: str, auth_name: str, code_data: dict | None = None,
 ) -> JSONResponse:
     """T2/T3 entry point: real pipeline, test side-effect routing.
 
@@ -849,6 +876,7 @@ async def handle_test_pipeline_submission(
         "subject": subject,
         "funding": funding,
         "related_identifiers": related_identifiers,
+        "code_data": code_data or {"available": None, "url": None},
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
@@ -979,6 +1007,7 @@ async def api_submit(request: Request):
         "orcid": form.get("orcid", ""),
         "coi": form.get("coi", ""),
     })
+    code_data = _parse_code_data(form.get("code_data_available"), form.get("code_data_url"))
 
     # Verified-identity headers from the CF Pages auth gate. We need these
     # early so the test-mode short-circuit can fire BEFORE any counter
@@ -1037,7 +1066,7 @@ async def api_submit(request: Request):
         # Tier 2 or Tier 3 — real pipeline, test subtree.
         return await handle_test_pipeline_submission(
             tier=tier, request=request, form=form, submitter=submitter,
-            auth_orcid=auth_orcid, auth_name=auth_name,
+            auth_orcid=auth_orcid, auth_name=auth_name, code_data=code_data,
         )
 
     pdf = form.get("pdf")
@@ -1198,6 +1227,7 @@ async def api_submit(request: Request):
         "subject": subject,
         "funding": funding,
         "related_identifiers": related_identifiers,
+        "code_data": code_data or {"available": None, "url": None},
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,

@@ -147,10 +147,27 @@ def main(argv: list[str]) -> int:
     source = submission.get("source") or "upload"
     source_ref = submission.get("doi") or submission.get("source_ref") or ""
 
-    panel_md, rqc_md = worker._scrubbed_report_pair(sub_id, title, tier=tier)
-
     state_path = sub_dir / "state.json"
     state_pre = json.loads(state_path.read_text()) if state_path.exists() else {}
+
+    # A paper held by the code and data check never reached the panel: it can
+    # be sent back (the email asks for the link) or scope-rejected, and an
+    # accept waits until code-check-override.sh has sent it to the panel.
+    held_for_code_link = state_pre.get("precheck") == "code_data_link_missing"
+    if held_for_code_link and verdict == "accept":
+        print(f"{sub_id} was held for a missing code/data link and has no panel review. "
+              f"Nothing done. If the flag was wrong, run intake/code-check-override.sh {sub_id} "
+              f"and decide after the panel.", file=sys.stderr)
+        return 3
+    code_link_claims = None
+    if held_for_code_link and verdict == "revise":
+        try:
+            code_link_claims = json.loads((sub_dir / "code_availability.json").read_text()).get("claims") or []
+        except Exception as exc:
+            print(f"  code_availability.json unreadable ({exc}); the email quotes nothing", file=sys.stderr)
+            code_link_claims = []
+
+    panel_md, rqc_md = worker._scrubbed_report_pair(sub_id, title, tier=tier)
     deposit_doi = state_pre.get("deposit_doi")
     deposit_url = state_pre.get("deposit_url")
 
@@ -381,6 +398,7 @@ def main(argv: list[str]) -> int:
         author_display=author_display, affiliation=affiliation, license_name=license_name,
         terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
         approval_url=approval_url, objection_deadline=objection_deadline,
+        code_link_claims=code_link_claims,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
