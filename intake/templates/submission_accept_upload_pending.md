@@ -9,7 +9,7 @@ Your manuscript has been accepted for publication by the Institute for Complexit
 **Received:** {{received_date}}
 **Decision:** {{decided_date}} — accepted
 
-Two PDFs are attached: the full panel report ({{review_pdf_name}}) and the Review Quality Control audit ({{rqc_pdf_name}}). Your paper was read by ten independent reviewer passes in two rounds, and the panel itself was audited for rubric adherence, consistency, specificity and tone. You are reading the same record we publish.
+Two PDFs are attached: the full panel report ({{review_pdf_name}}) and the Review Quality Control audit ({{rqc_pdf_name}}). Your paper was read in two rounds by a panel of independent reviewers (the report lists every pass and its scores), and the panel itself was audited for rubric adherence, consistency, specificity and tone. You are reading the same record we publish.
 
 {{curator_note}}
 
