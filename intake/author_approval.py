@@ -43,22 +43,25 @@ TEST_SUBMISSIONS_ROOT = SUBMISSIONS_ROOT / "test"
 SUB_ID_RE = re.compile(r"^(ICSAC-SUB-TEST-\d+|ICSAC-SUB-\d{5})$")
 
 # Single source of truth for the page (served by public_view) and the record.
+# `label` is the sentence on the response page's tick box (an explicit "Do not",
+# his 2026-09-28 rule: a ticked box must read as the instruction it gives);
+# `short` is the noun for status lines and curator pings ("excluding: social media").
 CATEGORIES = [
-    {"id": "social", "group": "promotion",
-     "label": "Social media",
-     "detail": "All platforms. We announce new papers with the title, author name and link."},
-    {"id": "print_broadcast", "group": "promotion",
-     "label": "Print materials and broadcast or paid advertising",
+    {"id": "social", "group": "promotion", "short": "social media",
+     "label": "Do not announce my paper on social media",
+     "detail": "All platforms. Unticked, we announce new papers with the title, author name and link."},
+    {"id": "print_broadcast", "group": "promotion", "short": "print materials and advertising",
+     "label": "Do not use my paper in print materials, broadcast or paid advertising",
      "detail": "Flyers, posters, conference materials, podcast or video mentions, paid placements."},
-    {"id": "newsletter", "group": "promotion",
-     "label": "Email newsletters and announcements",
+    {"id": "newsletter", "group": "promotion", "short": "newsletters and email announcements",
+     "label": "Do not include my paper in newsletters or email announcements",
      "detail": "Mentions in the Institute's newsletters to subscribers."},
-    {"id": "web_features", "group": "promotion",
-     "label": "Website features",
-     "detail": "Homepage or news items about the paper, beyond its own record page (which is part of publication)."},
-    {"id": "persistence", "group": "publishing",
-     "label": "The annual print and ebook edition of Persistence",
-     "detail": "The Institute's yearly paperback and ebook of the journal. Excluding it keeps the paper online-only."},
+    {"id": "web_features", "group": "promotion", "short": "website features",
+     "label": "Do not feature my paper on the website beyond its own record page",
+     "detail": "Homepage or news items about the paper. The record page itself is part of publication."},
+    {"id": "persistence", "group": "publishing", "short": "the annual print and ebook edition",
+     "label": "Do not include my paper in the annual print and ebook edition of Persistence",
+     "detail": "The Institute's yearly paperback and ebook of the journal. Ticked, the paper stays online-only."},
 ]
 CATEGORY_IDS = {c["id"] for c in CATEGORIES}
 PROMOTION_IDS = {c["id"] for c in CATEGORIES if c["group"] == "promotion"}
@@ -253,7 +256,7 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
 
 
 def _labels(excl: list) -> str:
-    by_id = {c["id"]: c["label"] for c in CATEGORIES}
+    by_id = {c["id"]: (c.get("short") or c["label"]) for c in CATEGORIES}
     return ", ".join(by_id.get(x, x) for x in excl) if excl else "none"
 
 
