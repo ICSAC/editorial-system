@@ -900,6 +900,16 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     if not review_md:
         log(f"  crossref: WARNING no public review record staged for {sub_id}; "
             f"the landing page will show none")
+    # The public stats snapshot rode only the legacy Zenodo path and had stood
+    # still since May (audit 2026-09-28 pass D); refresh it with every publication.
+    try:
+        import stats as _stats
+        stats_path = _stats.write_stats(config.REVIEWS_DIR,
+                                        os.path.join(publications.WEBSITE_REPO, "src", "data", "stats.json"))
+        if stats_path:
+            extra.append(stats_path)
+    except Exception as exc:   # the stats page must never block a registration
+        log(f"  crossref: stats snapshot not refreshed ({exc})")
     publications.commit_and_push(message=f"publications: {entry['title']} ({entry['slug']}) — {doi}",
                                  extra_paths=extra or None)
     state_p = sub_dir / "state.json"
