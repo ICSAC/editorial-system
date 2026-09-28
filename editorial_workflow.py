@@ -423,6 +423,15 @@ def main():
         except Exception as e:
             print(f"  author window check crashed (non-fatal): {e}")
 
+        print("[3b] Post-publication follow-ups (drafts only)...")
+        try:
+            from intake import post_publication
+            _fu = post_publication.run_tick()
+            print(f"  follow-ups: due={_fu['checked']} drafted={_fu['drafted']} "
+                  f"skipped={_fu['skipped']} errors={_fu['errors']}")
+        except Exception as e:
+            print(f"  follow-up check crashed (non-fatal): {e}")
+
         print("[3/4] Polling staged Zenodo drafts for publish transitions...")
         try:
             publish_summary = publish_watcher.poll_drafts()

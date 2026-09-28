@@ -205,6 +205,11 @@ def _notify_author_published(submission: dict, sub_id: str,
         print(f"  publish_watcher: {sub_id} has no form.email; skipping author notify",
               file=sys.stderr)
         return False
+    try:  # the one "stay involved" paragraph obeys the author's exclusions; unknown = left out
+        from intake import post_publication
+        stay = post_publication.wants_stay_involved(SUBMISSIONS_ROOT / sub_id, submission)
+    except Exception:
+        stay = False
     try:
         ok, info = intake_notify.send_published(
             to=to, sub_id=sub_id,
@@ -213,6 +218,7 @@ def _notify_author_published(submission: dict, sub_id: str,
             deposit_doi=deposit_doi,
             deposit_url=deposit_url,
             publications_url=publications.publications_url(entry["slug"]),
+            stay_involved=stay,
         )
         if not ok:
             print(f"  publish_watcher: send_published failed for {sub_id}: {info}",

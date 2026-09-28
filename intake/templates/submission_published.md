@@ -13,6 +13,8 @@ The DOI is yours to cite. Copyright remains yours; the paper is published under 
 
 Your paper is under consideration for *Persistence*, the institute's annual peer-reviewed paperback and ebook; if it is selected you will hear from us before that volume's publication date. We may announce the paper on the institute's channels at no cost to you, except where you asked us not to; reply at any time to change that.
 
+{{stay_involved}}
+
 {{curator_note}}
 
 — ICSAC

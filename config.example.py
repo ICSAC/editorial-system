@@ -151,6 +151,12 @@ TERMS_VERSION = os.environ.get("ICSAC_TERMS_VERSION", "2026-09-27")
 # a personal /approve/ link and this deadline. register --live waits for an
 # approval or the window's close unless the operator overrides.
 OBJECTION_WINDOW_DAYS = int(os.environ.get("ICSAC_OBJECTION_WINDOW_DAYS", "7"))
+# Days after DOI registration before the ONE post-publication follow-up (the
+# reviewer invitation) is DRAFTED for the curation team. Never sent by code;
+# never repeated; skipped when the author excluded newsletters, held, withdrew,
+# or is already on the website registries. See intake/post_publication.py.
+FOLLOWUP_DAYS = int(os.environ.get("ICSAC_FOLLOWUP_DAYS", "14"))
+
 SITE_BASE_URL = "https://icsacinstitute.org"
 # Suffix pattern; fields: {year} {seq} {sub_id}. seq is per-year, persisted in
 # CROSSREF_SEQ_FILE. Drafts can be re-staged under a new pattern for free;

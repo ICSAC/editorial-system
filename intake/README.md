@@ -15,6 +15,7 @@ marker for the editorial worker to pick up on its next batch tick.
 | `intake_server.py` | FastAPI app: `POST /api/submit`, `GET /api/submission/{id}/state`, `GET /healthz`. |
 | `submission_worker.py` | Drains the queue, resolves deferred DOIs, calls the editorial review pipeline (`review.review_paper`), routes verdicts. |
 | `apply_decision.py` | Finalizes a curator-driven decision on borderline submissions. |
+| `post_publication.py` | The one post-publication follow-up (reviewer invitation), drafted FOLLOWUP_DAYS after DOI registration; honours the author's exclusions and the registries. Batch-tick step 3b. |
 | `notify_author.py` | Author-facing email. Renders panel report + RQC to PDF (WeasyPrint) and attaches. Exposes `send_published()` — imported by editorial's `publish_watcher`. |
 | `rehydrate.py` / `rehydrate.sh` | Refetch a stubbed DOI submission's bytes from the resolver, verify SHA. |
 | `decide.sh` | Wrapper around `apply_decision.py` for invocation from a remote curator channel. |
