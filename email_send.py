@@ -190,7 +190,11 @@ def send_email(to_addr: str, subject: str, body_md: str,
         imap_pass = getattr(config, "IMAP_PASSWORD", smtp_pass)
         drafts_folder = getattr(config, "IMAP_DRAFTS_FOLDER", "[Gmail]/Drafts")
         try:
-            with imaplib.IMAP4_SSL(imap_host, imap_port) as imap:
+            # imaplib's default context does not verify the server certificate;
+            # the app password and every draft would go to whoever answers as
+            # Gmail (audit 2026-09-28 pass B).
+            with imaplib.IMAP4_SSL(imap_host, imap_port,
+                                   ssl_context=ssl.create_default_context(), timeout=30) as imap:
                 imap.login(imap_user, imap_pass)
                 raw = msg.as_bytes()
                 date = imaplib.Time2Internaldate(time.time())

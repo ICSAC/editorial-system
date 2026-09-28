@@ -11,7 +11,9 @@ RETENTION_DAYS="${RETENTION_DAYS:-7}"
 TEST_ROOT="${HOME}/icsac-submissions/test"
 TEST_OUTBOX="${TEST_ROOT}/_outbox"
 TEST_REVIEWS="${HOME}/Desktop/icsac/editorial-system/reviews/test"
-PAIN_URL="http://100.117.63.73:8090/pain"
+# The pain endpoint comes from the pipeline's configuration, not a literal
+# address in a public script (audit 2026-09-28 pass B).
+PAIN_URL="$(cd "${HOME}/Desktop/icsac/editorial-system" 2>/dev/null && set -a && . "${HOME}/.config/zenodo-pipeline.env" 2>/dev/null; set +a; .venv/bin/python -c 'import config; print(getattr(config, "NTFY_PAIN_URL", ""))' 2>/dev/null)"
 
 deleted_dirs=0
 deleted_eml=0

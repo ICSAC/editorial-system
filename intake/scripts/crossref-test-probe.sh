@@ -12,7 +12,10 @@ DONE="$CACHE/crossref-test-probe.done"; STARTED="$CACHE/crossref-test-probe.star
 [ -f "$STARTED" ] || date -u +%s > "$STARTED"
 set -a; . "$HOME/.config/crossref.env"; . "$HOME/.config/zenodo-pipeline.env"; set +a
 ping() { (cd "$REPO" && .venv/bin/python -c "import sys, notify; notify.send_to_curator(sys.argv[1], parse_mode=None)" "$1"); }
-body=$(curl -s -m 30 -w '\n%{http_code}' "https://test.crossref.org/servlet/login?usr=${CROSSREF_LOGIN_EMAIL}/${CROSSREF_ROLE}&pwd=${CROSSREF_PASSWORD}")
+# The credential rides in a curl config on stdin, never in argv (audit 2026-09-28 pass B).
+body=$(printf 'url = "https://test.crossref.org/servlet/login?usr=%s/%s&pwd=%s"\n' \
+         "${CROSSREF_LOGIN_EMAIL}" "${CROSSREF_ROLE}" "${CROSSREF_PASSWORD}" \
+       | curl -s -m 30 -w '\n%{http_code}' -K -)
 code=$(echo "$body" | tail -1)
 if [ "$code" = "200" ] && ! echo "$body" | grep -qi "wrong credentials"; then
   echo "$(date -u +%FT%TZ) GREEN"

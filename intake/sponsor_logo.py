@@ -65,6 +65,25 @@ ALLOWED_MIME_EXT = {
     "image/webp": "webp",
 }
 
+# A sponsor SVG is served from the site's own origin. Anything that can run or
+# fetch is refused at upload: scripts, event handlers, foreign objects, entity
+# declarations, external references (audit 2026-09-28 pass B). The site also
+# serves /supporter-logos/* under a script-free Content-Security-Policy.
+_SVG_ACTIVE_RE = re.compile(
+    rb"(<\s*(script|foreignObject|iframe|embed|object)\b"
+    rb"|\son[a-z]+\s*="
+    rb"|javascript\s*:"
+    rb"|<!ENTITY"
+    rb"|(xlink:)?href\s*=\s*[\"']\s*(https?:|//)"
+    rb"|@import"
+    rb"|url\s*\(\s*[\"']?\s*(https?:|//))",
+    re.IGNORECASE,
+)
+
+
+def _svg_is_inert(data: bytes) -> bool:
+    return _SVG_ACTIVE_RE.search(data) is None
+
 SESSION_ID_RE = re.compile(r"^cs_(live|test)_[A-Za-z0-9]+$")
 
 
@@ -347,6 +366,12 @@ async def handle_sponsor_logo(
             "unrecognised image format — supply PNG, JPEG, SVG, or WebP",
         )
     ext = ALLOWED_MIME_EXT[sniffed_mime]
+    if sniffed_mime == "image/svg+xml" and not _svg_is_inert(chunk_bytes):
+        raise HTTPException(
+            415,
+            "SVG logos must not contain scripts, event handlers, foreign objects, "
+            "entity declarations or external references",
+        )
 
     session = _retrieve_checkout_session(session_id)
     info = _verify_sponsor_session(session)
