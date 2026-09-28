@@ -89,6 +89,14 @@ SOFT_WARN_TOKENS: tuple[str, ...] = (
 # Added 2026-04-18 after prompt-injection attack-surface audit. Triggered
 # by file paths pointing at our hosts, env-var assignments, and known
 # credential prefixes. Match anywhere in the redacted review text.
+# Panel-composition talk in reviewer or RQC prose: a vendor or model name tied
+# to a seat ("Claude-position reviewers", "the GPT slot"). A paper's own AI-use
+# disclosure never takes this shape, so it is fatal wherever it appears, prose
+# included (audit 2026-09-28 item 4).
+FORBIDDEN_PANEL_PATTERNS: tuple[str, ...] = (
+    r"(?i)\b(?:claude|anthropic|gpt|chatgpt|openai|gemini|gemma|qwen|deepseek|llama|mistral|nemotron|sonnet|opus)[- ](?:position|seat|slot|reviewer|model)s?\b",
+)
+
 FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
     # Absolute filesystem paths likely pointing at our hosts
     r"/home/orangepi\b",
@@ -375,7 +383,7 @@ def build_public_markdown(parsed: ParsedReview) -> str:
             (
                 "*Reviews at ICSAC are open and transparent. AI tooling helps "
                 "the panel draft and structure each review; final acceptance "
-                "decisions rest with human editors. Reviews are published "
+                "decisions rest with human curators. Reviews are published "
                 "alongside acceptance for accountability; individual reviewer "
                 "identities are abstracted to keep focus on the assessment "
                 "rather than the tooling behind it.*"
@@ -452,6 +460,11 @@ _JARGON_REWRITES = (
     (re.compile(r"\bslots\b"), "reviewers"),
     (re.compile(r"\bSlot\b"), "Reviewer"),
     (re.compile(r"\bslot\b"), "reviewer"),
+    # The RQC sometimes names a seat by the model that fills it ("the
+    # Claude-position reviewers"); the public record names seats, never
+    # vendors (2026-09-28, found on the first external paper).
+    (re.compile(r"(?i)\bclaude-position\b"), "first-seat"),
+    (re.compile(r"(?i)\b(?:gpt|chatgpt|openai|gemini|gemma|qwen|deepseek|llama|mistral|nemotron)-position\b"), "panel-seat"),
 )
 
 
@@ -493,6 +506,7 @@ def scan(text: str) -> ScrubReport:
     fatal = _find_substring_hits(structural, FORBIDDEN_VENDOR_TOKENS)
     fatal.extend(_find_substring_hits(text, FORBIDDEN_SECRET_PHRASES))
     fatal.extend(_find_regex_hits(text, FORBIDDEN_EXFIL_PATTERNS))
+    fatal.extend(_find_regex_hits(text, FORBIDDEN_PANEL_PATTERNS))
     warn = _find_wordboundary_hits(text, SOFT_WARN_TOKENS)
     return ScrubReport(fatal_hits=fatal, warn_hits=warn)
 
@@ -742,7 +756,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     enforces this before the redaction writes anything to the site.
     """
     status_line = (
-        "Review Quality Control: flagged — reviewed by human editors before acceptance."
+        "Review Quality Control: flagged — reviewed by human curators before acceptance."
         if parsed.flag
         else "Review Quality Control: passed."
     )
@@ -775,7 +789,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         lines.extend([
             (
                 "The audit surfaced a concern outside the four scholarly "
-                "dimensions above. A human editor reviewed the panel output "
+                "dimensions above. Human curators reviewed the panel output "
                 "before the acceptance decision was recorded."
             ),
             "",
