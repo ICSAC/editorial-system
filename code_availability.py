@@ -38,6 +38,9 @@ _CLAIM_PATTERNS = [
     r"\b(?:archive|repository)\s+(?:contains|includes|provides)\b",
 ]
 _CLAIM_RE = re.compile("|".join(f"(?:{p})" for p in _CLAIM_PATTERNS), re.I)
+# The first pattern is a heading ("Data availability"); its answer follows it.
+_HEADING_RE = re.compile(_CLAIM_PATTERNS[0], re.I)
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 
 # Said right after an availability heading, these mean there is nothing to link.
 _NOTHING_TO_SHARE = re.compile(
@@ -81,7 +84,14 @@ def find_claims(text: str) -> list[str]:
     """Availability statements in `text`, one quoted sentence each."""
     out: list[str] = []
     for m in _CLAIM_RE.finditer(text):
-        if _NOTHING_TO_SHARE.search(text[m.end(): m.end() + 120]):
+        after = text[m.end(): m.end() + 120]
+        if not _HEADING_RE.fullmatch(m.group(0)):
+            # "Code is available. No new data were generated." The second
+            # sentence is about data; it does not take back the code claim.
+            end = _SENTENCE_END.search(after)
+            if end:
+                after = after[: end.start()]
+        if _NOTHING_TO_SHARE.search(after):
             continue
         quote = _sentence(text, m.start(), m.end())
         if quote not in out:

@@ -92,9 +92,10 @@ SOFT_WARN_TOKENS: tuple[str, ...] = (
 # Panel-composition talk in reviewer or RQC prose: a vendor or model name tied
 # to a seat ("Claude-position reviewers", "the GPT slot"). A paper's own AI-use
 # disclosure never takes this shape, so it is fatal wherever it appears, prose
-# included (audit 2026-09-28 item 4).
+# included (audit 2026-09-28 item 4). "Model" is not a seat word: a review of a
+# paper that studies "the GPT model" or "Llama models" must not trip the gate.
 FORBIDDEN_PANEL_PATTERNS: tuple[str, ...] = (
-    r"(?i)\b(?:claude|anthropic|gpt|chatgpt|openai|gemini|gemma|qwen|deepseek|llama|mistral|nemotron|sonnet|opus)[- ](?:position|seat|slot|reviewer|model)s?\b",
+    r"(?i)\b(?:claude|anthropic|gpt|chatgpt|openai|gemini|gemma|qwen|deepseek|llama|mistral|nemotron|sonnet|opus)[- ](?:position|seat|slot|reviewer)s?\b",
 )
 
 FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
@@ -756,7 +757,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     enforces this before the redaction writes anything to the site.
     """
     status_line = (
-        "Review Quality Control: flagged — reviewed by human curators before acceptance."
+        "Review Quality Control: flagged — reviewed by the curation team before acceptance."
         if parsed.flag
         else "Review Quality Control: passed."
     )

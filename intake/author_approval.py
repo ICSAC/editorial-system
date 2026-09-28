@@ -23,7 +23,10 @@ author_hold_note.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import fcntl
+import os
 import hashlib
 import json
 import re
@@ -107,7 +110,24 @@ def _load(sub_dir: Path) -> Optional[dict]:
 
 
 def _save(sub_dir: Path, rec: dict) -> None:
-    (Path(sub_dir) / FILE).write_text(json.dumps(rec, indent=2) + "\n")
+    p = Path(sub_dir) / FILE
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(rec, indent=2) + "\n")
+    os.replace(tmp, p)
+
+
+@contextlib.contextmanager
+def _locked(sub_dir: Path):
+    """One writer at a time per paper: the intake server records responses while
+    the batch tick marks closed windows, and a stale read in either would overwrite
+    the other's write (audit 2026-09-28)."""
+    fd = os.open(str(Path(sub_dir) / (FILE + ".lock")), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def is_test(sub_id: str) -> bool:
@@ -227,31 +247,39 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
         raise ValueError(f"unknown exclusion(s): {bad}")
     if choice != "approve" and excl:
         excl = []  # exclusions only mean something on an approval
-    st = _state(sub_dir)
-    if st.get("crossref_registered_at"):
-        raise Locked("the DOI is already registered; write to help@icsacinstitute.org for a correction")
-    if rec.get("status", "pending") != "pending" or rec.get("responses"):
-        # One response per paper (his rule 2026-09-28): the first click is the
-        # instruction of record; anything after it goes through help@.
-        raise Locked("your response is already on record; for any change write to "
-                     "help@icsacinstitute.org with your submission ID in the subject line")
-    entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note,
-             "quote_ok": bool(quote_ok) and choice == "approve",
-             "orcid": (orcid or "").strip()}   # the iD that signed this response (2026-09-28)
-    rec.setdefault("responses", []).append(entry)
-    rec["status"] = CHOICES[choice]
-    _save(sub_dir, rec)
-    fields = {
-        "author_approval_status": rec["status"],
-        "author_exclusions": excl,
-        "promotion_opt_out": bool(set(excl) & PROMOTION_IDS),
-        "persistence_opt_out": "persistence" in excl,
-        "withdrawn_by_author": choice == "withdraw",
-        "author_quote_ok": entry["quote_ok"],
-    }
-    if choice in ("hold", "withdraw"):
-        fields["author_hold_note"] = note
-    _update_state(sub_dir, **fields)
+    with _locked(sub_dir):
+        cur = _load(sub_dir)
+        if cur is not None:
+            if cur.get("token_sha256") != rec.get("token_sha256"):
+                raise Locked("this link is no longer valid; write to help@icsacinstitute.org "
+                             "with your submission ID in the subject line")
+            rec.clear()
+            rec.update(cur)
+        st = _state(sub_dir)
+        if st.get("crossref_registered_at"):
+            raise Locked("the DOI is already registered; write to help@icsacinstitute.org for a correction")
+        if rec.get("status", "pending") != "pending" or rec.get("responses"):
+            # One response per paper (his rule 2026-09-28): the first click is the
+            # instruction of record; anything after it goes through help@.
+            raise Locked("your response is already on record; for any change write to "
+                         "help@icsacinstitute.org with your submission ID in the subject line")
+        entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note,
+                 "quote_ok": bool(quote_ok) and choice == "approve",
+                 "orcid": (orcid or "").strip()}   # the iD that signed this response (2026-09-28)
+        rec.setdefault("responses", []).append(entry)
+        rec["status"] = CHOICES[choice]
+        _save(sub_dir, rec)
+        fields = {
+            "author_approval_status": rec["status"],
+            "author_exclusions": excl,
+            "promotion_opt_out": bool(set(excl) & PROMOTION_IDS),
+            "persistence_opt_out": "persistence" in excl,
+            "withdrawn_by_author": choice == "withdraw",
+            "author_quote_ok": entry["quote_ok"],
+        }
+        if choice in ("hold", "withdraw"):
+            fields["author_hold_note"] = note
+        _update_state(sub_dir, **fields)
     if audit:
         try:
             audit({"sub_id": sub_id, "event": "author_response", "choice": choice,
@@ -324,9 +352,13 @@ def check_windows(*, now: Optional[_dt.datetime] = None) -> int:
                      f"Accepted {str(st.get('completed_at', '?'))[:10]}; the author has not responded by "
                      f"{rec['deadline'][:10]}. Your call: intake/register-doi.sh {sub_dir.name} --live"):
             continue
-        rec["window_closed_pinged"] = True
-        rec["window_closed_pinged_at"] = _iso(now)
-        _save(sub_dir, rec)
+        with _locked(sub_dir):
+            # Re-read: the author may have answered while the ping was in flight.
+            cur = _load(sub_dir)
+            if cur and cur.get("status") == "pending" and not cur.get("window_closed_pinged"):
+                cur["window_closed_pinged"] = True
+                cur["window_closed_pinged_at"] = _iso(now)
+                _save(sub_dir, cur)
         pinged += 1
     return pinged
 
