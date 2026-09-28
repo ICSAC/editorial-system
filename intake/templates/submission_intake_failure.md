@@ -11,7 +11,7 @@ Your submission to the Institute for Complexity Science and Advanced Computing w
 
 {{remediation}}
 
-If you believe this is in error, reply to this message and reference the submission ID. The institute will investigate.
+If you believe this is in error, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with the submission ID in the subject line. The institute will investigate.
 
 — ICSAC
 Institute for Complexity Science and Advanced Computing

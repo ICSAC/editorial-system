@@ -19,7 +19,7 @@ This is not a judgment on the manuscript's merit on its own terms. It is a state
 
 ## Next steps
 
-If you believe this scope determination is in error, reply to this message with specific objections and the curator will re-evaluate. Otherwise we encourage you to seek a venue better aligned with the work's subject matter.
+If you believe this scope determination is in error, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with the submission ID in the subject line and your specific objections; the curation team will re-evaluate. Otherwise we encourage you to seek a venue better aligned with the work's subject matter.
 
 ICSAC does not charge submission, review, or article-processing fees.
 

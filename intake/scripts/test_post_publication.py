@@ -269,7 +269,7 @@ def main() -> int:
     check("community/donate" not in sent[5]["body_md"] and "{{" not in sent[5]["body_md"], "published notice omits the paragraph when not, with no unfilled keys")
     check(sent[6]["subject"].startswith("[T3 TEST] Your ICSAC paper is live"), "T3 published notice: prefixed draft")
     check(sent[7]["subject"].startswith("[T3 TEST]"), "published notice for a test id defaults to the T3 way")
-    check("about this paper unless you reply" in sent[0]["body_md"] and "works too" in sent[0]["body_md"], "follow-up copy carries the scoped silence sentence")
+    check("unless it is selected" in sent[0]["body_md"] and "help@icsacinstitute.org" in sent[0]["body_md"] and "reply" not in sent[0]["body_md"].lower(), "follow-up copy: no reply invited, support via help@ with the ID")
 
     print(f"\n{'PASS' if not failures else 'FAILED'}: {len(failures)} failure(s) in {tmp}")
     return 0 if not failures else 1

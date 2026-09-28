@@ -25,7 +25,7 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 
 - You keep the copyright. The paper is published under the licence you chose, **{{license_name}}**; the institute holds a non-exclusive licence to publish it. You may post or republish your PDF anywhere.
 - If selected for *Persistence*, the paper appears there under the same licence. *Persistence* is sold as a paperback and ebook; authors pay nothing and are paid nothing.
-- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the *Persistence* volume, on your response page or by reply.
+- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the *Persistence* volume, on your response page.
 - You will be listed as **{{author_display}}**{{affiliation_line}}.
 - We take it that this paper has no other DOI and is not under review elsewhere, as confirmed at submission.
 
@@ -35,13 +35,13 @@ Open your personal link to approve publication. There you can also tick anything
 
 **{{approval_url}}**
 
-If we have not heard from you by **{{objection_deadline}}**, we proceed with publication. After the DOI is registered the record is permanent and changes are made by published correction. Replying to this email works too.
+If we have not heard from you by **{{objection_deadline}}**, we proceed with publication. After the DOI is registered the record is permanent and changes are made by published correction. If the page does not work for you, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with your submission ID in the subject line.
 
 ## About this review
 
 {{compaction_disclosure}}
 
-If you would tell one colleague about this process, we would be glad of it. We would also like your permission to quote your experience when we describe the institute to other independent researchers; a one-line reply is enough.
+If you would tell one colleague about this process, we would be glad of it. If you write a few words about the process in the notes box on your response page and tick the box beneath it, we may quote them, with your name, when we describe the institute to other independent researchers.
 
 — ICSAC
 Institute for Complexity Science and Advanced Computing
