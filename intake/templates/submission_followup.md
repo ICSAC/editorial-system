@@ -6,11 +6,11 @@ Your paper, *{{title}}*, has been on the record at icsacinstitute.org since {{pu
 
 We would like to invite you to join the institute as a Reviewer. A Reviewer holds a human seat in the curation process: reviewers adjudicate the cases the panel surfaces and give domain-specific scrutiny on request. There is no fee. The term is one year, renewable.
 
-If that interests you, the application is at [icsacinstitute.org/community/membership-affiliation]({{community_url}}); choose Reviewer on the form. A reply to this email works too.
+If that interests you, the application is at [icsacinstitute.org/community/membership-affiliation]({{community_url}}); choose Reviewer on the form. Questions about it: email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with your submission ID in the subject line.
 
 {{curator_note}}
 
-There is no mailing list behind this invitation. You will not hear from us again about this paper unless you reply, or it is selected for *Persistence*.
+There is no mailing list behind this invitation. You will not hear from us again about this paper unless it is selected for *Persistence*.
 
 — ICSAC
 Institute for Complexity Science and Advanced Computing

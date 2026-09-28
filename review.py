@@ -452,6 +452,29 @@ def run_openrouter_review(prompt: str, slot, capture_path: str = None) -> dict:
     return parse_review_output(raw, f"openrouter:{actual_model}")
 
 
+_HF_CREDITS_ALERTED = False
+
+
+def _hf_credits_alert(model: str, body: str) -> None:
+    """HF answers 402 when the account's monthly Inference Providers credits are
+    spent (seen 2026-09-28 01:00Z on every deepinfra slot). The twice-daily model
+    check cannot see that (the catalog still lists the model), so say it ONCE per
+    process the moment a real request hits it. Never raises."""
+    global _HF_CREDITS_ALERTED
+    if _HF_CREDITS_ALERTED:
+        return
+    _HF_CREDITS_ALERTED = True
+    try:
+        import notify as _notify
+        _notify.send_to_curator(
+            f"HF INFERENCE CREDITS EXHAUSTED (HTTP 402 on {model}).\n"
+            f"Every hf| panel slot fails until the monthly credits reset or the account has PRO or "
+            f"pre-paid credits; submissions pause at the panel meanwhile.\n"
+            f"HF said: {body[:200]}", parse_mode=None)
+    except Exception:
+        pass
+
+
 def run_hf_router_review(prompt: str, hf_model: str, capture_path: str = None) -> dict:
     """Run review via HuggingFace Inference Providers Router.
 
@@ -506,6 +529,8 @@ def run_hf_router_review(prompt: str, hf_model: str, capture_path: str = None) -
     except urllib.error.HTTPError as e:
         ex.shutdown(wait=False)
         body = e.read()[:300].decode(errors="replace")
+        if e.code == 402:
+            _hf_credits_alert(hf_model, body)
         return {"error": f"HTTP {e.code}: {body}", "model": f"hf:{hf_model}"}
     except Exception as e:
         ex.shutdown(wait=False)

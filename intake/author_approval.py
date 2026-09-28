@@ -181,6 +181,7 @@ def public_view(sub_dir: Path, rec: dict) -> dict:
         "window_open": _now() < deadline,
         "status": rec.get("status", "pending"),
         "exclusions": list(last.get("exclusions") or []),
+        "quote_ok": bool(last.get("quote_ok")),
         "responded_at": last.get("at"),
         "categories": CATEGORIES,
         "note_min": NOTE_MIN,
@@ -191,8 +192,11 @@ def public_view(sub_dir: Path, rec: dict) -> dict:
 # ── record a decision ─────────────────────────────────────────────────────────
 
 def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
-           exclusions: Optional[list] = None, *,
+           exclusions: Optional[list] = None, *, quote_ok: Optional[bool] = None,
            audit: Optional[Callable[[dict], None]] = None) -> dict:
+    """quote_ok: the author ticked "you may quote my notes" (2026-09-28). Off unless
+    ticked; recorded with the response and mirrored to state.author_quote_ok. Nothing
+    author-facing ever asks for a reply: choices are buttons and links."""
     sub_dir = Path(sub_dir)
     sub_id = sub_dir.name
     if choice not in CHOICES:
@@ -212,7 +216,8 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
     st = _state(sub_dir)
     if st.get("crossref_registered_at"):
         raise Locked("the DOI is already registered; write to help@icsacinstitute.org for a correction")
-    entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note}
+    entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note,
+             "quote_ok": bool(quote_ok) and choice == "approve"}
     rec.setdefault("responses", []).append(entry)
     rec["status"] = CHOICES[choice]
     _save(sub_dir, rec)
@@ -222,6 +227,7 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
         "promotion_opt_out": bool(set(excl) & PROMOTION_IDS),
         "persistence_opt_out": "persistence" in excl,
         "withdrawn_by_author": choice == "withdraw",
+        "author_quote_ok": entry["quote_ok"],
     }
     if choice in ("hold", "withdraw"):
         fields["author_hold_note"] = note
@@ -229,11 +235,11 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
     if audit:
         try:
             audit({"sub_id": sub_id, "event": "author_response", "choice": choice,
-                   "exclusions": excl, "note": note[:300], "by": "author"})
+                   "exclusions": excl, "quote_ok": entry["quote_ok"], "note": note[:300], "by": "author"})
         except Exception:
             pass
     if not is_test(sub_id):
-        _ping(_curator_text(sub_id, choice, excl, note))
+        _ping(_curator_text(sub_id, choice, excl, note, entry["quote_ok"]))
     return {"sub_id": sub_id, "status": rec["status"], "exclusions": excl, "recorded_at": entry["at"]}
 
 
@@ -242,9 +248,10 @@ def _labels(excl: list) -> str:
     return ", ".join(by_id.get(x, x) for x in excl) if excl else "none"
 
 
-def _curator_text(sub_id: str, choice: str, excl: list, note: str) -> str:
+def _curator_text(sub_id: str, choice: str, excl: list, note: str, quote_ok: bool = False) -> str:
     if choice == "approve":
-        body = (f"Author APPROVED publication. Exclusions: {_labels(excl)}."
+        body = (f"Author APPROVED publication. Exclusions: {_labels(excl)}. "
+                f"Quote permission: {'yes' if quote_ok else 'no'}."
                 + (f"\nNote: {note[:400]}" if note else "")
                 + f"\nNext: intake/register-doi.sh {sub_id} --live")
     elif choice == "hold":
