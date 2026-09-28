@@ -49,10 +49,10 @@ SUB_ID_RE = re.compile(r"^(ICSAC-SUB-TEST-\d+|ICSAC-SUB-\d{5})$")
 CATEGORIES = [
     {"id": "social", "group": "promotion", "short": "social media",
      "label": "Do not announce my paper on social media",
-     "detail": "All platforms. Unticked, we announce new papers with the title, author name and link."},
+     "detail": "All platforms, at no cost to you. Unticked, we announce new papers with the title, author name and link."},
     {"id": "print_broadcast", "group": "promotion", "short": "print materials and advertising",
      "label": "Do not use my paper in print materials, broadcast or paid advertising",
-     "detail": "Flyers, posters, conference materials, podcast or video mentions, paid placements."},
+     "detail": "Flyers, posters, conference materials, podcast or video mentions, paid placements. The Institute pays for all of it."},
     {"id": "newsletter", "group": "promotion", "short": "newsletters and email announcements",
      "label": "Do not include my paper in newsletters or email announcements",
      "detail": "Mentions in the Institute's newsletters to subscribers."},
@@ -61,7 +61,7 @@ CATEGORIES = [
      "detail": "Homepage or news items about the paper. The record page itself is part of publication."},
     {"id": "persistence", "group": "publishing", "short": "the annual print and ebook edition",
      "label": "Do not include my paper in the annual print and ebook edition of Persistence",
-     "detail": "The Institute's yearly paperback and ebook of the journal. Ticked, the paper stays online-only."},
+     "detail": "The Institute's yearly paperback and ebook of the journal, at no cost to you. Ticked, the paper stays online-only."},
 ]
 CATEGORY_IDS = {c["id"] for c in CATEGORIES}
 PROMOTION_IDS = {c["id"] for c in CATEGORIES if c["group"] == "promotion"}
