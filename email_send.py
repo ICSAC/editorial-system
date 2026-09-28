@@ -20,8 +20,11 @@ import markdown
 import config
 
 
-LOGO_CID = "icsac-logo"
-LOGO_PATH = os.path.join(config.BASE_DIR, "assets", "icsac-logo.png")
+# The logo is a hosted image, not an inline CID part: Gmail's editor drops the
+# inline part when a draft is edited before sending and rewrites the tag to a
+# proxy URL that resolves for nobody else (found on the first external accept,
+# 2026-09-28). The file is public/email-logo.png in the website repo.
+LOGO_URL = getattr(config, "EMAIL_LOGO_URL", "https://icsacinstitute.org/email-logo.png")
 
 HTML_WRAPPER = """<!DOCTYPE html>
 <html>
@@ -43,7 +46,7 @@ hr {{ border: none; border-top: 1px solid #e4e4e4; margin: 2em 0 1em; }}
 </style>
 </head>
 <body>
-<div class="logo"><img src="cid:{cid}" alt="ICSAC"></div>
+<div class="logo"><img src="{logo}" alt="ICSAC" width="256" style="max-width:256px;height:auto"></div>
 {body}
 </body>
 </html>
@@ -62,9 +65,9 @@ def _markdown_to_plaintext(md: str) -> str:
 
 
 def _markdown_to_html(md: str) -> str:
-    """Render markdown body to HTML with a branded wrapper and inline logo CID."""
+    """Render markdown body to HTML with a branded wrapper and the hosted logo."""
     inner = markdown.markdown(md, extensions=["extra", "sane_lists"])
-    return HTML_WRAPPER.format(cid=LOGO_CID, body=inner)
+    return HTML_WRAPPER.format(logo=LOGO_URL, body=inner)
 
 
 def extract_subject(rendered_template: str) -> str:
@@ -141,15 +144,6 @@ def send_email(to_addr: str, subject: str, body_md: str,
     msg["Reply-To"] = reply_to
     msg.set_content(plain)
     msg.add_alternative(html, subtype="html")
-
-    try:
-        with open(LOGO_PATH, "rb") as f:
-            logo_data = f.read()
-        msg.get_payload()[1].add_related(
-            logo_data, maintype="image", subtype="png", cid=f"<{LOGO_CID}>"
-        )
-    except FileNotFoundError:
-        return (False, f"logo asset missing: {LOGO_PATH}")
 
     for filename, data in (attachments or []):
         subtype = "pdf" if filename.lower().endswith(".pdf") else "octet-stream"
