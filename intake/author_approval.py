@@ -57,8 +57,8 @@ CATEGORIES = [
      "label": "Website features",
      "detail": "Homepage or news items about the paper, beyond its own record page (which is part of publication)."},
     {"id": "persistence", "group": "publishing",
-     "label": "The Persistence annual volume",
-     "detail": "The Institute's yearly paperback and ebook. Excluding it keeps the paper online-only."},
+     "label": "The annual print and ebook edition of Persistence",
+     "detail": "The Institute's yearly paperback and ebook of the journal. Excluding it keeps the paper online-only."},
 ]
 CATEGORY_IDS = {c["id"] for c in CATEGORIES}
 PROMOTION_IDS = {c["id"] for c in CATEGORIES if c["group"] == "promotion"}
