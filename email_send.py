@@ -67,7 +67,23 @@ def _markdown_to_plaintext(md: str) -> str:
 def _markdown_to_html(md: str) -> str:
     """Render markdown body to HTML with a branded wrapper and the hosted logo."""
     inner = markdown.markdown(md, extensions=["extra", "sane_lists"])
+    inner = _box_response_section(inner)
     return HTML_WRAPPER.format(logo=LOGO_URL, body=inner)
+
+
+_RESPONSE_BOX = ('<div style="border-left:3px solid #8B5E3C;background:#F5F2EC;'
+                 'padding:12px 18px;margin:22px 0;">')
+
+
+def _box_response_section(html: str) -> str:
+    """The "Your response" section (up to the next heading) sits in a bronze
+    box so the one action the author must take cannot be missed (2026-09-28)."""
+    m = re.search(r"<h2>Your response[^<]*</h2>", html)
+    if not m:
+        return html
+    nxt = re.search(r"<h2>", html[m.end():])
+    stop = m.end() + nxt.start() if nxt else len(html)
+    return html[:m.start()] + _RESPONSE_BOX + html[m.start():stop] + "</div>" + html[stop:]
 
 
 def extract_subject(rendered_template: str) -> str:
