@@ -146,7 +146,7 @@ not a general-purpose academic peer review platform. It is not a service you
 can submit to without going through `icsacinstitute.org/submit`. It is not a
 replacement for human editorial judgment — every panel outcome routes to a
 human curator for the final verdict, and any author who disagrees with that
-verdict can appeal to a human editor.
+verdict can appeal to the curation team.
 
 It is also opinionated. The rubrics reflect the institute's editorial scope:
 complexity science, information theory, persistence dynamics, and adjacent
@@ -244,7 +244,7 @@ to fork, adapt, and use as the basis for your own institute's review system.
 
 If your paper was reviewed by this system and you disagree with the panel's
 recommendation: write to `help@icsacinstitute.org` with your submission ID in
-the subject line. A human editor reads every appeal. The panel is not the last word — it is a thorough first pass that the
+the subject line. The curation team reads every appeal. The panel is not the last word — it is a thorough first pass that the
 curator turns into the verdict, and that the editor overrides on appeal.
 
 If your paper was accepted: the redacted review is published at
