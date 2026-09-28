@@ -227,7 +227,7 @@ def _fail_intake(sub_id: str, sub_dir: Path, submission: dict,
                  failure_reason=reason)
     _audit({"sub_id": sub_id, "event": "intake_failed",
             "reason": reason[:300]})
-    # Test tiers: no Gmail draft, no curator Telegram, no pain (a second model I7 -- this
+    # Test tiers: no Gmail draft, no curator Telegram, no pain (audit 2026-09-27 item 7 -- this
     # path had no tier routing and would have drafted to production Gmail).
     if bool(submission.get("test_mode")) or sub_id.startswith("ICSAC-SUB-TEST-"):
         _log(f"  intake failed for {sub_id} (test tier): {reason[:120]} -- author email + pings suppressed")

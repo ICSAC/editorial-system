@@ -93,7 +93,7 @@ def _sub(parent: ET.Element, tag: str, text: Optional[str] = None,
 
 def _next_seq(seq_file: Path) -> int:
     """Monotonic per-year sequence, fcntl-locked like the submission counter.
-    Flushed + fsynced BEFORE the lock is released (a second model I6: the old order
+    Flushed + fsynced BEFORE the lock is released (audit 2026-09-27 item 6: the old order
     unlocked with the write still buffered). A corrupt counter is refused, not
     silently reset to zero -- a reset would re-issue suffixes."""
     seq_file.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +128,7 @@ def assign_doi(sub_dir: Path, *, explicit: Optional[str] = None) -> str:
     cr_dir = sub_dir / "crossref"
     doi_json = cr_dir / "doi.json"
     if sub_dir.name.startswith("ICSAC-SUB-TEST-") and not explicit:
-        # Test-tier submissions never touch the production counter (a second model I7).
+        # Test-tier submissions never touch the production counter (audit 2026-09-27 item 7).
         explicit = f"{_cfg('CROSSREF_PREFIX', '10.67697')}/TEST.{sub_dir.name}"
     if doi_json.exists():
         prior = json.loads(doi_json.read_text())
@@ -716,7 +716,7 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
 
 
 def _publish_zenodo_archive(sub_dir: Path, doi: str, *, log) -> Optional[str]:
-    """Publish the Zenodo draft staged at accept. PREFLIGHT first (a second model I3): the
+    """Publish the Zenodo draft staged at accept. PREFLIGHT first (audit 2026-09-27 item 3): the
     remote draft must carry OUR DOI as its external DOI, or we refuse -- publishing
     a draft without it would make Zenodo mint 10.5281/… and put two DOIs on one
     paper. Idempotent: an already-published record is returned, not re-published.
@@ -892,7 +892,7 @@ def main(argv: list[str]) -> int:
                     print("aborted"); return 2
             try:
                 res = register(_resolve(a.sub_id), live=a.live, override_window=a.override_window)
-            except Exception as e:  # ANY live failure reaches the curator, not only ours (a second model I4)
+            except Exception as e:  # ANY live failure reaches the curator, not only ours (audit 2026-09-27 item 4)
                 if a.live:
                     _ping(f"DOI registration FAILED for {a.sub_id}: {type(e).__name__}: {str(e)[:300]}\n"
                           f"Re-run intake/register-doi.sh {a.sub_id} --live to resume from the last checkpoint.")
