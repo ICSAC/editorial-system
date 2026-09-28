@@ -231,10 +231,19 @@ def handle_ebook_webhook(payload: bytes, sig_header: str) -> tuple[int, dict]:
     # the purchase is actually our ebook product before emailing.
     try:
         resp = _retrieve_session(session_id)
-        full = resp.json() if resp.status_code == 200 else {}
-    except httpx.HTTPError:
-        full = {}
-    ok, reason = _is_paid_ebook(full) if full else (False, "lookup_failed")
+    except httpx.HTTPError as exc:
+        # A transient Stripe failure must be retried by Stripe, not acknowledged
+        # and dropped (audit 2026-09-28 pass B).
+        return (500, {"error": "lookup_failed", "detail": str(exc)[:120]})
+    if resp.status_code == 404:
+        return (200, {"ignored": "no_such_session"})
+    if resp.status_code != 200:
+        return (500, {"error": "lookup_failed", "status": resp.status_code})
+    try:
+        full = resp.json()
+    except Exception:
+        return (500, {"error": "lookup_unreadable"})
+    ok, reason = _is_paid_ebook(full)
     if not ok:
         return (200, {"ignored": reason})
 
@@ -243,8 +252,17 @@ def handle_ebook_webhook(payload: bytes, sig_header: str) -> tuple[int, dict]:
     if not email:
         return (200, {"ignored": "no_email"})
 
+    # One email per session across the webhook and the download page; a Stripe
+    # redelivery or a replay never sends twice (audit 2026-09-28 pass B).
+    claim = _claim_send(session_id)
+    if not claim:
+        return (200, {"ignored": "already_sent"})
     sent, msg = _send_download_email(email, session_id)
     if not sent:
+        try:
+            os.unlink(claim)   # release the claim so the retry (or the page) can send
+        except OSError:
+            pass
         # 500 so Stripe retries the webhook rather than dropping the email.
         return (500, {"error": "email_failed", "detail": msg})
     return (200, {"emailed": True})

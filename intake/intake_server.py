@@ -1297,7 +1297,9 @@ def api_submission_state(sub_id: str):
         "received_at_display": to_et_display(received_utc),
         "completed_at": completed_utc,
         "completed_at_display": to_et_display(completed_utc),
-        "decision": data.get("decision"),
+        # No decision on the unauthenticated endpoint: submission ids are
+        # sequential and guessable, and the author has the decision by email
+        # (audit 2026-09-28 pass B).
         "test_mode": bool(data.get("test_mode", False)),
         "tier": data.get("tier") if data.get("test_mode") else None,
     }
