@@ -172,7 +172,7 @@ DOI_REGISTRAR = os.environ.get("DOI_REGISTRAR", "crossref")
 CROSSREF_PREFIX = os.environ.get("CROSSREF_PREFIX", "10.67697")
 # The "Last revised" date shown on icsacinstitute.org/terms. Written into every
 # submission record so we can say which Terms an author accepted. Keep in sync.
-TERMS_VERSION = os.environ.get("ICSAC_TERMS_VERSION", "2026-09-27")
+TERMS_VERSION = os.environ.get("ICSAC_TERMS_VERSION", "2026-09-28")
 # Author objection window (days) opened at accept; the acceptance email carries
 # a personal /approve/ link and this deadline. register --live waits for an
 # approval or the window's close unless the operator overrides.
