@@ -22,6 +22,20 @@ if str(_REPO_ROOT) not in sys.path:
 import email_send  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+COMMUNITY_URL = "https://icsacinstitute.org/community/membership-affiliation"
+
+
+def _fragment(name: str) -> str:
+    """A reusable paragraph kept in templates/ (rendered into another template)."""
+    return (TEMPLATES_DIR / name).read_text().strip()
+
+
+def _delivery_tier(sub_id: str, tier: int) -> int:
+    """A test submission is never delivered as production: anything that is not
+    T2 (outbox) goes the T3 way, a Gmail draft with the `[T3 TEST] ` prefix."""
+    if sub_id.startswith("ICSAC-SUB-TEST-") and tier not in (2, 3):
+        return 3
+    return tier
 
 
 # Print-optimized CSS for the panel-report and RQC PDFs. Letter trim,
@@ -142,8 +156,15 @@ def send_intake_failure(*, to: str, sub_id: str, author_name: str,
 def send_published(*, to: str, sub_id: str, title: str, author_name: str,
                    deposit_doi: str, deposit_url: str,
                    publications_url: str, curator_note: str = "",
-                   license_name: str = "") -> tuple[bool, str]:
+                   license_name: str = "", stay_involved: bool = True,
+                   tier: int = 1) -> tuple[bool, str]:
     """Send the post-publish notification email for a PDF-route accept.
+
+    stay_involved=False drops the one "ways to stay involved" paragraph (the
+    author excluded newsletters, or is already on a registry): see
+    intake/post_publication.wants_stay_involved. It is asked once, here; the
+    later follow-up carries the reviewer invitation only. `tier` routes test
+    submissions like send_decision (2 -> outbox .eml, 3 -> `[T3 TEST]` draft).
 
     Fired by the publish_watcher in the editorial-system repo when a curator
     publishes the previously-staged Zenodo draft and the DOI becomes
@@ -158,12 +179,53 @@ def send_published(*, to: str, sub_id: str, title: str, author_name: str,
         "deposit_url": deposit_url,
         "publications_url": publications_url,
         "license_name": license_name or "the open licence you selected",
+        "stay_involved": _fragment("_stay_involved.md") if stay_involved else "",
         "curator_note": curator_note.strip() or (
             "[CURATOR NOTE - optional: one sentence to the author before sending, "
             "or delete this bracket.]"),
     })
+    tier = _delivery_tier(sub_id, tier)
+    if tier == 2:
+        from pathlib import Path as _Path
+        outbox = _Path.home() / "icsac-submissions" / "test" / "_outbox"
+        return email_send.send_email(
+            to_addr=to, subject=subject, body_md=body,
+            outbox_dir=str(outbox), eml_filename=f"{sub_id}-published.eml")
+    if tier == 3:
+        return email_send.send_email(to_addr=to, subject=f"[T3 TEST] {subject}",
+                                     body_md=body, draft=True)
     return email_send.send_email(to_addr=to, subject=subject,
                                  body_md=body, draft=True)  # Gmail Drafts; curator sends (2026-09-27)
+
+
+def send_followup(*, to: str, sub_id: str, title: str, author_name: str,
+                  published_date: str = "", curator_note: str = "",
+                  tier: int = 1) -> tuple[bool, str]:
+    """DRAFT the one post-publication follow-up: the reviewer invitation
+    (intake/post_publication.py decides when and whether). Never sends. No
+    attachments. Tier routing as send_decision: 1 -> Gmail Drafts, 2 -> outbox
+    .eml, 3 -> Gmail Drafts with the `[T3 TEST] ` prefix."""
+    subject, body = _render("submission_followup.md", {
+        "icsac_submission_id": sub_id,
+        "title": title, "author_name": author_name,
+        "published_date": published_date or "its publication",
+        "community_url": COMMUNITY_URL,
+        "curator_note": curator_note.strip() or (
+            "[CURATOR NOTE - optional: one sentence in your own words, "
+            "or delete this bracket.]"),
+    })
+    tier = _delivery_tier(sub_id, tier)
+    if tier == 2:
+        from pathlib import Path as _Path
+        outbox = _Path.home() / "icsac-submissions" / "test" / "_outbox"
+        return email_send.send_email(
+            to_addr=to, subject=subject, body_md=body,
+            outbox_dir=str(outbox), eml_filename=f"{sub_id}-followup.eml")
+    if tier == 3:
+        return email_send.send_email(to_addr=to, subject=f"[T3 TEST] {subject}",
+                                     body_md=body, draft=True)
+    return email_send.send_email(to_addr=to, subject=subject,
+                                 body_md=body, draft=True)  # Gmail Drafts; the curation team sends
 
 
 def send_decision(*, to: str, sub_id: str, title: str, author_name: str,

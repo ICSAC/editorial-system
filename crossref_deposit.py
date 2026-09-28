@@ -824,12 +824,26 @@ def _notify_author(sub_dir: Path, submission: dict, doi: str, slug: Optional[str
         import publications
         form = submission.get("form", {})
         landing = publications.publications_url(slug) if slug else f"https://doi.org/{doi}"
+        test_mode = bool(submission.get("test_mode")) or sub_dir.name.startswith("ICSAC-SUB-TEST-")
+        tier = 1
+        if test_mode:
+            try:
+                tier = 2 if int(submission.get("tier") or 0) == 2 else 3
+            except (TypeError, ValueError):
+                tier = 3
+        try:  # ask once, and never an author who excluded newsletters or already belongs;
+              # unknown consent (unreadable record, registry down) = no optional ask
+            from intake import post_publication
+            stay = post_publication.wants_stay_involved(sub_dir, submission)
+        except Exception:
+            stay = False
         ok, info = notify_author.send_published(
             to=form["email"], sub_id=sub_dir.name, title=submission.get("title") or "",
             author_name=form.get("name", ""), deposit_doi=doi,
             deposit_url=archive_url or landing,
             publications_url=landing,
-            license_name=LICENSE_LABELS.get((submission.get("license") or "").lower(), ""))
+            license_name=LICENSE_LABELS.get((submission.get("license") or "").lower(), ""),
+            stay_involved=stay, tier=tier)
         log(f"  crossref: author published-notice {'DRAFTED' if ok else 'FAILED: ' + str(info)}")
         return bool(ok)
     except Exception as exc:  # the DOI is registered either way; never mask that
