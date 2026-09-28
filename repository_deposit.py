@@ -189,6 +189,12 @@ def _build_metadata(submission: dict, *, external_doi: str | None = None,
             {"identifier": r["identifier"], "relation": r["relation"]}
             for r in related
         ]
+    # The author's code and data link (the form's answer): the record says the
+    # paper "is supplemented by" it. ICSAC links; the files stay with the author.
+    code_url = ((submission.get("code_data") or {}).get("url") or "").strip()
+    if code_url and code_url not in {r.get("identifier") for r in related}:
+        metadata.setdefault("related_identifiers", []).append(
+            {"identifier": code_url, "relation": "isSupplementedBy"})
 
     return metadata
 

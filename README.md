@@ -68,7 +68,20 @@ For each submission:
    [`citation_misattribution.py`](citation_misattribution.py)) — every cited
    work is checked against arXiv, Crossref, and Semantic Scholar. Fabricated
    and misattributed citations are flagged.
-4. **Five-reviewer panel** ([`review.py`](review.py)) — a panel of independent
+4. **Code and data link** ([`code_availability.py`](code_availability.py)) —
+   ICSAC links to an author's code and data and never hosts them. A paper
+   that says its code or data is available must say where: the link given on
+   the submission form, a supplement related identifier, or a repository link
+   in the paper's body. A paper that makes the claim with no link anywhere is
+   held before the panel runs and recommended for revise and resubmit; the
+   curator signs that like every other decision, and the email quotes the
+   paper's own sentence and asks for the link. The check reads availability
+   statements, not the words "code" and "data", skips the reference list,
+   and treats "not applicable" as nothing to link. A wrong flag is cleared
+   with `intake/code-check-override.sh <id>`, which sends the paper to the
+   panel. The published paper's page says: "Code and data: [link], hosted by
+   the author. ICSAC links to it and doesn't host, run or maintain it."
+5. **Five-reviewer panel** ([`review.py`](review.py)) — a panel of independent
    model instances reviews the manuscript against ICSAC's rubrics (scope,
    methodology, calibration, tone, AI provenance signal). Each reviewer scores
    blind to the others. The panel tolerates one slot failure per pass via
@@ -78,13 +91,13 @@ For each submission:
    router, OpenRouter). A paper the panel cannot staff is re-queued on
    every batch tick and the curation team is alerted loudly once it has
    waited a day for reviewers.
-5. **Review quality control** ([`review_quality_control.py`](review_quality_control.py)) —
+6. **Review quality control** ([`review_quality_control.py`](review_quality_control.py)) —
    a separate auditor reviews the panel itself. Low-confidence dimensions,
    missing injection indicators, or systemic drift trigger curator alerts.
-6. **Redaction** ([`redaction.py`](redaction.py)) — internal reasoning, vendor
+7. **Redaction** ([`redaction.py`](redaction.py)) — internal reasoning, vendor
    names, and operational metadata are stripped before any review is shared
    with the author or published.
-7. **Decision** ([`action.py`](action.py)) — the panel recommends one of three
+8. **Decision** ([`action.py`](action.py)) — the panel recommends one of three
    outcomes:
    - **Accept** — a DOI under the institute's own Crossref prefix is
      registered and the paper is published at
@@ -166,6 +179,7 @@ a Python subpackage at [`intake/`](intake/).
 | `submission_intake.py` | Manuscript fetching and text extraction |
 | `citation_verify.py` | Cross-reference citation validation |
 | `citation_misattribution.py` | Catches "real DOI, wrong paper" errors |
+| `code_availability.py` | Holds a paper that says it has code or data but gives no link |
 | `review.py` | The five-reviewer panel |
 | `review_quality_control.py` | Auditor that scores the panel |
 | `redaction.py` | Redaction layer for public review output |
@@ -189,6 +203,7 @@ a Python subpackage at [`intake/`](intake/).
 | `intake/intake_server.py` | FastAPI app: `POST /api/submit`, `GET /api/submission/{id}/state`, `GET /healthz` |
 | `intake/submission_worker.py` | Drains the queue, resolves deferred DOIs, dispatches into the review pipeline |
 | `intake/apply_decision.py` | Applies the curator's verdict: publications registration, deposit staging, author email |
+| `intake/code-check-override.sh` | Clears a wrong code-and-data flag and queues the paper for the panel |
 | `intake/author_approval.py` | The author's response page: approve / hold / withdraw, exclusions, quote permission, the objection window |
 | `intake/post_publication.py` | The one post-publication follow-up (reviewer invitation), drafted seven days after registration |
 | `intake/notify_author.py` | Author email rendering; attaches redacted panel report + RQC as PDFs |

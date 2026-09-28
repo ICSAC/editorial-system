@@ -41,6 +41,7 @@ import publications  # noqa: E402
 import review        # noqa: E402
 import redaction      # noqa: E402
 import notify        # noqa: E402
+import code_availability  # noqa: E402
 
 from . import notify_author  # local
 from .time_fmt import now_et_display  # local
@@ -453,19 +454,34 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
             rqc_flag = match.group(1)
 
     fingerprint = "icsacsub" + hashlib.sha1(sub_id.encode()).hexdigest()[:10]
-    initial_msg = (
-        f"ICSAC submission — needs your call.\n\n"
-        f"ID: {sub_id}\n"
-        f"Title: {title[:200]}\n"
-        f"Panel recommendation: {rec}\n"
-        f"Aggregate score: {avg if avg is not None else '(n/a)'}\n"
-        f"Disagreement: {'yes' if aggregate.get('disagreement', False) else 'no'}\n"
-        f"RQC flag: {rqc_flag}\n\n"
-        f"Per-dimension means:\n{score_block}\n\n"
-        f"Your call: accept / revise / scope_reject\n"
-        f"(Reply on the curator's configured reply channel; "
-        f"or 'park' to shelve until later.)"
-    )
+    precheck_note = aggregate.get("precheck_note")
+    if precheck_note:
+        initial_msg = (
+            f"ICSAC submission — needs your call.\n\n"
+            f"ID: {sub_id}\n"
+            f"Title: {title[:200]}\n"
+            f"Recommendation: {rec} (the panel did not run)\n\n"
+            f"{precheck_note}\n\n"
+            f"Your call: revise (the email asks for the link)\n"
+            f"A wrong flag: {INTAKE_DIR / 'code-check-override.sh'} {sub_id} "
+            f"sends the paper to the panel.\n"
+            f"(Reply on the curator's configured reply channel; "
+            f"or 'park' to shelve until later.)"
+        )
+    else:
+        initial_msg = (
+            f"ICSAC submission — needs your call.\n\n"
+            f"ID: {sub_id}\n"
+            f"Title: {title[:200]}\n"
+            f"Panel recommendation: {rec}\n"
+            f"Aggregate score: {avg if avg is not None else '(n/a)'}\n"
+            f"Disagreement: {'yes' if aggregate.get('disagreement', False) else 'no'}\n"
+            f"RQC flag: {rqc_flag}\n\n"
+            f"Per-dimension means:\n{score_block}\n\n"
+            f"Your call: accept / revise / scope_reject\n"
+            f"(Reply on the curator's configured reply channel; "
+            f"or 'park' to shelve until later.)"
+        )
     msg_id = notify.send_telegram(initial_msg, parse_mode=None,
                                   chat_override=chat_override,
                                   thread_override=thread_override)
@@ -676,6 +692,9 @@ def _register_doi_accept(sub_id: str, sub_dir: Path,
     record_id = _zenodo_record_id_from_doi(doi)
     if record_id:
         proto["record_id"] = record_id
+    cdu = publications.code_data_url(submission)
+    if cdu:
+        proto["code_data_url"] = cdu
 
     entry = publications.upsert_entry(proto)
     slug = entry["slug"]
@@ -822,6 +841,43 @@ def _process_locked(sub_id: str) -> None:
         )
         return
 
+    # Code and data availability (policy of 2026-09-28): ICSAC links to an
+    # author's code and data and never hosts them. A paper that says it has
+    # code or data and gives no link anywhere is held for a revise before the
+    # panel runs; the curator signs it. code-check-override.sh clears a wrong flag.
+    state_now = json.loads((sub_dir / "state.json").read_text()) if (sub_dir / "state.json").exists() else {}
+    cda = None
+    if not state_now.get("code_check_override"):
+        try:
+            cda = code_availability.assess(submission, review_data.get("full_text", ""))
+            (sub_dir / "code_availability.json").write_text(json.dumps(cda, indent=2) + "\n")
+        except Exception as exc:
+            # A broken check must not block papers: the panel runs, the curator hears.
+            _log(f"  code/data check failed, panel runs anyway: {exc}", err=True)
+            _maybe_alert("ICSAC code/data check failed",
+                         f"{sub_id}: {type(exc).__name__}: {exc}; the panel ran without the check")
+            _a({"sub_id": sub_id, "event": "code_check_failed",
+                "error": f"{type(exc).__name__}: {exc}"[:300]})
+        if cda and cda["missing_link"]:
+            rec = "REVISE_AND_RESUBMIT"
+            _log(f"  code/data link missing: {len(cda['claims'])} claim(s), no link; panel not run")
+            _a({"sub_id": sub_id, "event": "code_data_link_missing",
+                "claims": [c[:200] for c in cda["claims"]]})
+            _write_state(sub_dir, state="awaiting_decision",
+                         precheck="code_data_link_missing",
+                         precheck_completed_at=_now_iso(),
+                         pending_recommendation=rec)
+            quoted = "\n".join(f'  "{c[:220]}"' for c in cda["claims"][:3])
+            _route_to_curator(sub_id, sub_dir, review_data, {
+                "recommendation": rec,
+                "precheck_note": ("The paper says it has code or data, and no link was "
+                                  "given on the form or in the paper:\n" + quoted),
+            }, rec, test_mode=test_mode, tier=tier, audit=_a)
+            return
+    elif not state_now.get("code_check_override_logged"):
+        _a({"sub_id": sub_id, "event": "code_check_overridden"})
+        _write_state(sub_dir, code_check_override_logged=True)
+
     try:
         markdown, aggregate = review.review_paper(review_data)
     except Exception as exc:
@@ -912,7 +968,17 @@ def _process_locked(sub_id: str) -> None:
     _write_state(sub_dir, state="awaiting_decision",
                  panel_completed_at=_now_iso(),
                  pending_recommendation=rec)
+    _route_to_curator(sub_id, sub_dir, review_data, aggregate, rec,
+                      test_mode=test_mode, tier=tier, audit=_a)
 
+
+def _route_to_curator(sub_id: str, sub_dir: Path, review_data: dict,
+                      aggregate: dict, rec: str, *, test_mode: bool,
+                      tier: int, audit) -> None:
+    """Hand a recommendation to the curator: production pings the reply
+    channel; T3 with a test chat pings that chat; T2 and T3 without one log
+    and stop. Shared by the panel path and the code/data hold."""
+    _a = audit
     if test_mode:
         # T3 with TELEGRAM_TEST_CHAT_ID configured: fire the curator
         # escalation to the test chat so the full T3 spec

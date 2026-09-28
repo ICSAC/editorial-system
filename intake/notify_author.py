@@ -303,6 +303,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   author_display: str = "", affiliation: str = "", license_name: str = "",
                   terms_version: str = "", approval_url: str = "",
                   objection_deadline: str = "",
+                  code_link_claims: list[str] | None = None,
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -338,6 +339,10 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
             ("scope_reject", "doi"): "submission_scope_reject_doi.md",
             ("scope_reject", "upload"): "submission_scope_reject_upload.md",
         }.get((verdict, source))
+    if verdict == "revise" and code_link_claims is not None:
+        # Held by the code and data check before the panel: the email asks for
+        # the link and carries no panel report (there is none).
+        template = "submission_revise_codelink.md"
     if not template:
         raise ValueError(f"unknown (verdict, source): {verdict!r}, {source!r}")
     import review_compaction
@@ -422,6 +427,8 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "objection_deadline": objection_deadline or "the date in our follow-up",
         "review_pdf_name": f"icsac-review-{sub_id}.pdf",
         "rqc_pdf_name": f"icsac-rqc-{sub_id}.pdf",
+        "code_claims": "\n\n".join(f'> "{c}"' for c in (code_link_claims or [])) or (
+            "> (the availability statement in your manuscript)"),
         "citation_line": citation_line or (
             "Your reference list was resolved against public registries as part of the review."),
     })

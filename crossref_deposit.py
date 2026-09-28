@@ -880,6 +880,9 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
         proto["promotion_exclusions"] = [x for x in st_now["author_exclusions"] if x != "persistence"]
     if st_now.get("persistence_opt_out"):
         proto["persistence_opt_out"] = True
+    cdu = publications.code_data_url(submission)
+    if cdu:
+        proto["code_data_url"] = cdu
     entry = publications.upsert_entry(proto)
     if not entry:
         log("  crossref: publications registry not configured; landing page NOT pushed")

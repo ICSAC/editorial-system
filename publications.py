@@ -82,7 +82,15 @@ def _save_registry(registry: list[dict]) -> None:
 _OPTIONAL_KEYS = (
     "license_url", "keywords", "canonical_url", "ssrn_id", "ssrn_url", "ssrn_doi",
     "promotion_opt_out", "promotion_exclusions", "persistence_opt_out",
+    "code_data_url",
 )
+
+
+def code_data_url(submission: dict) -> Optional[str]:
+    """The author's public code and data link from the submission form, if
+    any. The paper page prints it as hosted by the author; ICSAC never hosts it."""
+    url = ((submission.get("code_data") or {}).get("url") or "").strip()
+    return url or None
 
 
 def _match_existing(registry: list[dict], proto: dict) -> Optional[int]:
