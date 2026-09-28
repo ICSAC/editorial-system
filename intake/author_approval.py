@@ -72,7 +72,8 @@ NOTE_MAX = 1500    # characters, all notes; over the limit is refused, never cut
 
 
 class Locked(RuntimeError):
-    """The DOI is registered; the link can no longer change anything."""
+    """The link can no longer change anything: the DOI is registered, or a
+    response is already on record (one response per paper)."""
 
 
 def _now() -> _dt.datetime:
@@ -229,6 +230,11 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
     st = _state(sub_dir)
     if st.get("crossref_registered_at"):
         raise Locked("the DOI is already registered; write to help@icsacinstitute.org for a correction")
+    if rec.get("status", "pending") != "pending" or rec.get("responses"):
+        # One response per paper (his rule 2026-09-28): the first click is the
+        # instruction of record; anything after it goes through help@.
+        raise Locked("your response is already on record; for any change write to "
+                     "help@icsacinstitute.org with your submission ID in the subject line")
     entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note,
              "quote_ok": bool(quote_ok) and choice == "approve",
              "orcid": (orcid or "").strip()}   # the iD that signed this response (2026-09-28)
