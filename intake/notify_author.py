@@ -43,7 +43,17 @@ def _delivery_tier(sub_id: str, tier: int) -> int:
 # per-dimension score tables render cleanly. No vendor/model styling
 # concerns since the PDFs render the SCRUBBED markdown.
 _PDF_CSS = """
-@page { size: Letter; margin: 0.85in 0.9in; }
+@page {
+  size: Letter; margin: 0.85in 0.9in 0.95in 0.9in;
+  @bottom-left { content: "Institute for Complexity Science and Advanced Computing \\00b7 icsacinstitute.org"; font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8pt; color: #666; }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8pt; color: #666; }
+}
+table.lh { width: 100%; border-collapse: collapse; margin: 0 0 0.3in 0; border-bottom: 1.5px solid #1f1f1f; }
+table.lh td { border: none; padding: 0 0 0.2in 0; vertical-align: middle; }
+td.lh-logo-cell { width: 1.1in; }
+img.lh-logo { height: 0.62in; width: auto; display: block; }
+.lh-name { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 11.5pt; font-weight: 600; letter-spacing: 0.01em; color: #111; }
+.lh-meta { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 9pt; color: #555; margin-top: 0.1in; }
 body { font-family: Georgia, "Times New Roman", serif; font-size: 10.5pt; line-height: 1.5; color: #1f1f1f; }
 h1, h2, h3, h4 { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; color: #111; font-weight: 600; page-break-after: avoid; }
 h1 { font-size: 1.5em; border-bottom: 2px solid #888; padding-bottom: 0.3em; margin-top: 0; }
@@ -65,22 +75,65 @@ details > summary { cursor: pointer; font-weight: 600; margin: 0.6em 0; }
 """
 
 
-def _md_to_pdf_bytes(md_text: str, *, doc_title: str | None = None) -> bytes:
+_LOGO_PATH = _REPO_ROOT / "assets" / "icsac-logo.png"
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December")
+
+
+def _logo_data_uri() -> str:
+    import base64
+    try:
+        return "data:image/png;base64," + base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+    except OSError:
+        return ""
+
+
+def _frontmatter_date(md_text: str) -> str:
+    """'review_date: 2026-09-27T16:40:58Z' in the frontmatter -> '27 September 2026'."""
+    m = re.search(r"^(?:review_date|audit_date):\s*(\d{4})-(\d{2})-(\d{2})", md_text, re.MULTILINE)
+    if not m:
+        return ""
+    y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    return f"{d} {_MONTHS[mo - 1]} {y}"
+
+
+def _letterhead_html(kind: str | None, sub_id: str | None, dated: str) -> str:
+    import html as _html
+    meta = " \u00b7 ".join(x for x in (kind or "", f"Submission {sub_id}" if sub_id else "", dated) if x)
+    logo = _logo_data_uri()
+    logo_cell = f'<td class="lh-logo-cell"><img class="lh-logo" src="{logo}" alt="ICSAC"></td>' if logo else ""
+    return (
+        '<table class="lh"><tr>' + logo_cell +
+        '<td><div class="lh-name">Institute for Complexity Science and Advanced Computing</div>'
+        f'<div class="lh-meta">{_html.escape(meta)}</div></td></tr></table>'
+    )
+
+
+def _md_to_pdf_bytes(md_text: str, *, doc_title: str | None = None,
+                     kind: str | None = None, sub_id: str | None = None) -> bytes:
     """Render markdown to a print-quality PDF via WeasyPrint.
 
     Used for the panel-report and RQC attachments on decision emails. Input
     is the SCRUBBED markdown (vendor/model identifiers and the RQC
     injection_indicators dim already stripped upstream); we don't
-    re-validate here — caller owns the redaction gate.
+    re-validate here — caller owns the redaction gate. The page carries the
+    Institute's letterhead (logo, name, document kind, submission id, the
+    review date) and a running footer with page numbers (2026-09-28).
     """
     import markdown as _md_lib
     import weasyprint
-    inner = _md_lib.markdown(md_text, extensions=["extra", "sane_lists", "tables"])
+    dated = _frontmatter_date(md_text)
+    body_md = md_text
+    if body_md.startswith("---\n"):
+        end = body_md.find("\n---", 4)
+        if end != -1:
+            body_md = body_md[end + 4:].lstrip("\n")
+    inner = _md_lib.markdown(body_md, extensions=["extra", "sane_lists", "tables"])
     title_html = f"<title>{doc_title}</title>" if doc_title else ""
     full = (
         f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
         f"{title_html}<style>{_PDF_CSS}</style></head>"
-        f"<body>{inner}</body></html>"
+        f"<body>{_letterhead_html(kind, sub_id, dated)}{inner}</body></html>"
     )
     return weasyprint.HTML(string=full).write_pdf()
 
@@ -370,12 +423,14 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
     if panel_report_md.strip():
         attachments.append((
             f"icsac-review-{sub_id}.pdf",
-            _md_to_pdf_bytes(panel_report_md, doc_title=f"ICSAC Review — {sub_id}"),
+            _md_to_pdf_bytes(panel_report_md, doc_title=f"ICSAC Review — {sub_id}",
+                             kind="Panel report", sub_id=sub_id),
         ))
     if rqc_md.strip():
         attachments.append((
             f"icsac-rqc-{sub_id}.pdf",
-            _md_to_pdf_bytes(rqc_md, doc_title=f"ICSAC Review Quality Control — {sub_id}"),
+            _md_to_pdf_bytes(rqc_md, doc_title=f"ICSAC Review Quality Control — {sub_id}",
+                             kind="Review Quality Control audit", sub_id=sub_id),
         ))
 
     # Decision emails (accept/revise/scope_reject) are HIGH-STAKES author-facing
