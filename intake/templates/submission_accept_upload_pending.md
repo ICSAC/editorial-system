@@ -15,8 +15,8 @@ Two PDFs are attached: the full panel report ({{review_pdf_name}}) and the Revie
 
 ## What happens next
 
-1. We register a DOI for your paper under the institute's own prefix and publish it at icsacinstitute.org, with the panel's open review record alongside it. You will receive a second email with the DOI and the links once both are live. Nothing is needed from you.
-2. Every accepted paper is eligible for *Persistence*, the institute's annual paperback and ebook, sold through the major retailers, the channels libraries and universities buy from, and icsacinstitute.org. If yours is included you will hear from us 60 to 120 days before that edition's publication date with a short intent-to-publish form (a headshot, a short biography). We do not answer questions about inclusion before then, so add info@icsacinstitute.org and help@icsacinstitute.org to your contacts. How it works: [icsacinstitute.org/journal](https://icsacinstitute.org/journal#how-it-works).
+1. We register a DOI for your paper under the institute's own prefix and publish it in *Persistence*, the institute's journal, online first at icsacinstitute.org, with the panel's open review record alongside it. You will receive a second email with the DOI and the links once both are live. Nothing is needed from you.
+2. Each volume of *Persistence* is also printed as an annual paperback and ebook, sold through the major retailers, the channels libraries and universities buy from, and icsacinstitute.org, and every paper in the volume is eligible for that edition. If yours is included you will hear from us 60 to 120 days before the edition's publication date with a short intent-to-publish form (a headshot, a short biography). We do not answer questions about inclusion before then, so add info@icsacinstitute.org and help@icsacinstitute.org to your contacts. How it works: [icsacinstitute.org/journal](https://icsacinstitute.org/journal#how-it-works).
 3. {{citation_line}}
 
 ## Terms of publication
@@ -24,14 +24,14 @@ Two PDFs are attached: the full panel report ({{review_pdf_name}}) and the Revie
 These are the terms you accepted at submission (icsacinstitute.org/terms, revised {{terms_version}}), restated so nothing is a surprise:
 
 - You keep the copyright. The paper is published under the licence you chose, **{{license_name}}**; the institute holds a non-exclusive licence to publish it. You may post or republish your PDF anywhere.
-- If included in *Persistence*, the paper appears there under the same licence. *Persistence* is sold as a paperback and ebook; authors pay nothing and are paid nothing, and there are no free, discounted, draft, or author copies. Credential holders receive a member discount on copies.
-- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the *Persistence* volume, on your response page.
+- The paper is published in *Persistence* online under that licence, and appears under the same licence in the annual print and ebook edition if included. The edition is sold as a paperback and ebook; authors pay nothing and are paid nothing, and there are no free, discounted, draft, or author copies. Credential holders receive a member discount on copies.
+- We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the annual print and ebook edition of *Persistence*, on your response page.
 - You will be listed as **{{author_display}}**{{affiliation_line}}.
 - We take it that this paper has no other DOI and is not under review elsewhere, as confirmed at submission.
 
 ## Your response
 
-Open your personal link to approve publication. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the *Persistence* volume — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
+Open your personal link to approve publication. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
 
 **{{approval_url}}**
 
