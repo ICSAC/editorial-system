@@ -1392,7 +1392,7 @@ async def api_approve_record(request: Request):
             raise HTTPException(400, "bad exclusions")
         return author_approval.record(
             sub_dir, rec, str(d.get("choice") or ""), str(d.get("note") or ""),
-            [str(x) for x in excl], quote_ok=bool(d.get("quote_ok")),
+            [str(x) for x in excl], quote_ok=bool(d.get("quote_ok")), orcid=session_orcid,
             audit=lambda e: _audit_append(e, test_mode=test_mode))
     except author_approval.Locked as e:
         raise HTTPException(409, str(e))
