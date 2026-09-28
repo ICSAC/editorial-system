@@ -299,12 +299,32 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         )
     else:
         manifest_lines = review_compaction.render_manifest(compaction_manifest)
+        # Say what the manifest shows, not what the step is meant to do: a run
+        # that identified no author details left them visible to the panel
+        # (2026-09-28: the first external paper's manifest held only the
+        # reference list).
+        removed_identity = any(compaction_manifest.get(k)
+                               for k in ("author_names", "affiliations", "emails", "orcids"))
+        if removed_identity:
+            lead = (
+                "Before our AI panel reviewed your manuscript, the editorial "
+                "system automatically removed author names, affiliations, "
+                "contact information, ORCID iDs, acknowledgments, funding "
+                "statements, and the references list (inline citation markers "
+                "were preserved). ")
+        else:
+            lead = (
+                "Before our AI panel reviewed your manuscript, the editorial "
+                "system ran its blind-review preprocessing, which is meant to "
+                "remove author names, affiliations, contact information, ORCID "
+                "iDs, acknowledgments, funding statements, and the references "
+                "list (inline citation markers are preserved). For your "
+                "manuscript it identified and removed only what is listed "
+                "below; author details elsewhere in the text stayed visible to "
+                "the panel. ")
         disclosure = (
-            "Before our AI panel reviewed your manuscript, the editorial "
-            "system automatically removed author names, affiliations, "
-            "contact information, ORCID iDs, acknowledgments, funding "
-            "statements, and the references list (inline citation markers "
-            "were preserved). This is a standard double-blind preprocessing "
+            lead +
+            "This is a standard double-blind preprocessing "
             "step intended to reduce author-identity bias, lower token "
             "consumption, and add a privacy layer between authors and the "
             "models in the panel. Citation verification was performed "

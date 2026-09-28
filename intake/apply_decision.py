@@ -68,6 +68,12 @@ def _audit(event: dict, *, test_mode: bool = False) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
+def _salutation_name(name: str) -> str:
+    """'[author] [author]' -> '[author] [author]': forms arrive with surnames in
+    capitals; the salutation should not shout (2026-09-28)."""
+    return " ".join(t.title() if (t.isupper() and len(t) > 1) else t for t in (name or "").split())
+
+
 def _curator_routing(test_mode: bool, tier: int) -> dict:
     """Return kwargs for notify.send_to_curator routing.
 
@@ -363,7 +369,7 @@ def main(argv: list[str]) -> int:
 
     ok, info = notify_author.send_decision(
         to=form["email"], sub_id=sub_id, title=title,
-        author_name=form["name"], verdict=verdict,
+        author_name=_salutation_name(form["name"]), verdict=verdict,
         source=source, source_ref=source_ref,
         panel_report_md=panel_md, rqc_md=rqc_md,
         deposit_doi=deposit_doi, deposit_url=deposit_url,
