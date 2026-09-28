@@ -205,6 +205,7 @@ def public_view(sub_dir: Path, rec: dict) -> dict:
 
 def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
            exclusions: Optional[list] = None, *, quote_ok: Optional[bool] = None,
+           orcid: str = "",
            audit: Optional[Callable[[dict], None]] = None) -> dict:
     """quote_ok: the author ticked "you may quote my notes" (2026-09-28). Off unless
     ticked; recorded with the response and mirrored to state.author_quote_ok. Nothing
@@ -229,7 +230,8 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
     if st.get("crossref_registered_at"):
         raise Locked("the DOI is already registered; write to help@icsacinstitute.org for a correction")
     entry = {"at": _iso(_now()), "choice": choice, "exclusions": excl, "note": note,
-             "quote_ok": bool(quote_ok) and choice == "approve"}
+             "quote_ok": bool(quote_ok) and choice == "approve",
+             "orcid": (orcid or "").strip()}   # the iD that signed this response (2026-09-28)
     rec.setdefault("responses", []).append(entry)
     rec["status"] = CHOICES[choice]
     _save(sub_dir, rec)
@@ -247,7 +249,8 @@ def record(sub_dir: Path, rec: dict, choice: str, note: str = "",
     if audit:
         try:
             audit({"sub_id": sub_id, "event": "author_response", "choice": choice,
-                   "exclusions": excl, "quote_ok": entry["quote_ok"], "note": note[:300], "by": "author"})
+                   "exclusions": excl, "quote_ok": entry["quote_ok"], "note": note[:300],
+                   "orcid": entry["orcid"], "by": "author"})
         except Exception:
             pass
     if not is_test(sub_id):
