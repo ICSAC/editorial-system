@@ -45,6 +45,13 @@ ZENODO_RESOURCE_TYPE = {
     "other":     ("other", None),
 }
 
+# Crossref content type of the ICSAC record -> Zenodo publication_type of its archival copy.
+CROSSREF_TO_ZENODO_TYPE = {
+    "journal-article": "article",
+    "report-paper":    "report",
+    "posted_content":  "preprint",
+}
+
 
 class DepositFailed(RuntimeError):
     """Raised when the Zenodo deposit pipeline can't reach a published
@@ -171,6 +178,19 @@ def _build_metadata(submission: dict, *, external_doi: str | None = None,
         # ICSAC record before 2026-09-27 reads publisher = "Zenodo" because
         # this was never set.
         metadata["imprint_publisher"] = publisher
+    if external_doi:
+        # The archival copy of an ICSAC-registered work takes the type of its
+        # Crossref record, not the form's resource type (whose default is
+        # "preprint"): a Persistence article is a journal article in Persistence,
+        # volume N, on Zenodo too (2026-09-29).
+        ct = getattr(config, "CROSSREF_CONTENT_TYPE", "journal-article")
+        metadata["upload_type"] = "publication"
+        publication_type = CROSSREF_TO_ZENODO_TYPE.get(ct, "article")
+        if ct == "journal-article":
+            metadata["journal_title"] = getattr(config, "CROSSREF_JOURNAL_TITLE", "Persistence")
+            volume = str(getattr(config, "CROSSREF_JOURNAL_VOLUME", "") or "").strip()
+            if volume:
+                metadata["journal_volume"] = volume
     if publication_type:
         metadata["publication_type"] = publication_type
     if keywords:
