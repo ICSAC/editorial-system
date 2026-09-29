@@ -303,6 +303,38 @@ def stage_deposit_draft(submission: dict, paper_pdf_path: Path,
     return {"record_id": record_id, "draft_url": draft_url}
 
 
+def accept_community_inclusion(record_id: str, *, community: str | None = None) -> str:
+    """Accept the inclusion request that publishing opened for the Institute's own
+    Zenodo community (the community reviews every submission, the Institute's too).
+    Called only from register-doi.sh --live, whose typed confirmation is the
+    curator's approval (his yes, 2026-09-29). Never used for an author's own records:
+    ICSAC links to authors' code and data, it does not curate them.
+
+    Returns "accepted", "already" (the record is in the community), "none" (no
+    pending request to act on) or "not-permitted" (the token may not accept).
+    Raises DepositFailed on an HTTP error.
+    """
+    api = config.ZENODO_API
+    token = config.ZENODO_TOKEN
+    slug = community or config.COMMUNITY_ID
+    comm_id = _request_json("GET", f"{api}/communities/{slug}", token=token).get("id")
+    if not comm_id:
+        return "none"
+    members = _request_json("GET", f"{api}/records/{record_id}/communities", token=token)
+    if any(h.get("id") == comm_id for h in (members.get("hits") or {}).get("hits") or []):
+        return "already"
+    reqs = _request_json("GET", f"{api}/records/{record_id}/requests", token=token)
+    for r in (reqs.get("hits") or {}).get("hits") or []:
+        if (r.get("type") == "community-inclusion" and r.get("status") == "submitted"
+                and (r.get("receiver") or {}).get("community") == comm_id):
+            accept = ((r.get("links") or {}).get("actions") or {}).get("accept")
+            if not accept:
+                return "not-permitted"
+            _request_json("POST", accept, token=token, body={})
+            return "accepted"
+    return "none"
+
+
 def publish_draft(record_id: str, *, log=None) -> dict:
     """Publish a previously-staged draft deposit. Mints the DOI, makes the
     record live, triggers icsac-community membership.

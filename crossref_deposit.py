@@ -875,6 +875,17 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
                 _write_json_atomic(state_p, state)
         outcome["archive"] = ck.get("archive_url")
 
+        # 4b. the Institute's Zenodo community (his yes, 2026-09-29): publishing opens an
+        # inclusion request the community must accept, and --live is his approval, so it
+        # is accepted here. Never fatal: a failure is reported and a re-run tries again.
+        if not ck.get("zenodo_community_at") and ck.get("archive_url") not in (None, "none"):
+            result = _accept_zenodo_community(state.get("deposit_record_id"), log=log)
+            ck["zenodo_community"] = result
+            if result in ("accepted", "already"):
+                ck["zenodo_community_at"] = _now_iso()
+            _save_staged()
+        outcome["community"] = ck.get("zenodo_community")
+
         # 5. author notice, DRAFTED
         if not ck.get("author_drafted_at"):
             ok = _notify_author(sub_dir, submission, doi, state.get("publications_slug"),
@@ -894,10 +905,25 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
     _ping(f"DOI REGISTERED for {sub_dir.name}: https://doi.org/{doi}\n"
           f"Landing: {outcome.get('landing') or '(publications not configured)'}\n"
           f"Zenodo archive: {outcome.get('archive')}\n"
+          f"ICSAC Zenodo community: {outcome.get('community') or 'not attempted'}\n"
           f"Author 'published' email: {outcome['author_draft']}"
           + (" (Gmail Drafts -- review and send by hand)" if ck.get("author_drafted_at") else "")
           + ("\n(resumed from an earlier partial run)" if outcome["resumed"] else ""))
     return {**outcome, **(ck.get("crossref_result") or {})}
+
+
+def _accept_zenodo_community(record_id, *, log) -> str:
+    """Accept the ICSAC community inclusion for the published archive copy; never raises."""
+    if not record_id:
+        return "none"
+    try:
+        import repository_deposit
+        result = repository_deposit.accept_community_inclusion(str(record_id))
+        log(f"  crossref: ICSAC Zenodo community for record {record_id}: {result}")
+        return result
+    except Exception as exc:
+        log(f"  crossref: ICSAC Zenodo community for record {record_id} FAILED: {str(exc)[:200]}")
+        return f"failed: {str(exc)[:120]}"
 
 
 def _publish_zenodo_archive(sub_dir: Path, doi: str, *, log) -> Optional[str]:
