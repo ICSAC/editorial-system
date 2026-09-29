@@ -113,8 +113,21 @@ try:
     check(stats.compute_stats(str(rdir)).get("total_reviewed") == 0, "an empty reviews dir counts zero")
     cd = (ROOT / "crossref_deposit.py").read_text()
     g = cd.find("if (fresh.get(\"total_reviewed\") or 0) < published:")
-    w = cd.find("stats_path = _stats.write_stats(config.REVIEWS_DIR, out)")
+    w = cd.find("stats_path = _stats.write_stats(config.REVIEWS_DIR, out, pub)")
     check(0 < g < w, "a fresh count below the published total is never written")
+    pub = tmp / "public-reviews"; pub.mkdir()
+    (pub / "111.md").write_text("---\nrecord_id: 111\nreview_date: 2026-04-28T18:15:05Z\nrecommendation: RECOMMEND\n"
+                                "consensus: divided\n---\n\n### Aggregate scores\n\n| Dimension | Mean | Scores |\n|---|---|---|\n"
+                                "| Domain Fit | 4.6 | 4, 5 |\n| AI Slop Detection | 4.0 | 4, 4 |\n\n### Individual\n")
+    (pub / "111_review_quality_control.md").write_text("---\nrecord_id: 111\nreview_quality_control_flag: false\n---\n")
+    (pub / "ICSAC-SUB-00001.md").write_text("---\nrecord_id: ICSAC-SUB-00001\nrecommendation: REJECT\n---\n")
+    (rdir / "ICSAC-SUB-00001_x.md").write_text("---\nrecord_id: ICSAC-SUB-00001\nrecommendation: RECOMMEND\ndisagreement: False\n---\n")
+    st = stats.compute_stats(str(rdir), str(pub))
+    check(st["total_reviewed"] == 2, "published records count, and a record in both places counts once")
+    check(st["recommendation_mix"]["RECOMMEND"] == 2, "the raw record wins over its published copy")
+    check(st["dimension_means_overall"].get("Domain Fit") == 4.6, "the published ### Aggregate scores table is read")
+    check(st["dimension_means_overall"].get("AI Provenance Signal") == 4.0, "the old AI Slop Detection label counts as AI Provenance Signal")
+    check(st["rqc_audited_count"] == 1, "published RQC flags are read")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

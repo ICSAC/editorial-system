@@ -911,7 +911,8 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     try:
         import stats as _stats
         out = os.path.join(publications.WEBSITE_REPO, "src", "data", "stats.json")
-        fresh = _stats.compute_stats(config.REVIEWS_DIR)
+        pub = os.path.join(publications.WEBSITE_REPO, "src", "data", "public-reviews")
+        fresh = _stats.compute_stats(config.REVIEWS_DIR, pub)
         try:
             published = json.loads(Path(out).read_text()).get("total_reviewed") or 0
         except Exception:
@@ -920,7 +921,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
             log(f"  crossref: stats snapshot kept: a fresh count of {fresh.get(total_reviewed)} "
                 f"would replace the published {published}")
         else:
-            stats_path = _stats.write_stats(config.REVIEWS_DIR, out)
+            stats_path = _stats.write_stats(config.REVIEWS_DIR, out, pub)
             if stats_path:
                 extra.append(stats_path)
     except Exception as exc:   # the stats page must never block a registration
