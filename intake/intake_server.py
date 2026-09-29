@@ -747,6 +747,7 @@ async def handle_test_pipeline_submission(
     if has_doi:
         _validate_doi_shape(doi)
     preprint = None if has_doi else await _preprint_from_form(form)
+    article_license = _doi_route_license(form) if has_doi else None
 
     sub_id = _allocate_test_sub_id()
     token = _test_token(tier, seed=sub_id)
@@ -760,7 +761,7 @@ async def handle_test_pipeline_submission(
         title = "(deferred — resolving from DOI)"
         abstract = ""
         keywords: list = []
-        license_id = ""
+        license_id = article_license or ""
         creators = [{"name": submitter["name"], "orcid": token}]
         publication_date = _now_iso()[:10]
         resource_type = None
@@ -880,6 +881,7 @@ async def handle_test_pipeline_submission(
         "related_identifiers": related_identifiers,
         "code_data": code_data or {"available": None, "url": None},
         "preprint_doi": preprint["doi"] if preprint else None,
+        "article_license": article_license,
         "preprint_meta": preprint,
         "pdf": {
             "filename": "paper.pdf",
@@ -954,6 +956,22 @@ async def handle_test_pipeline_submission(
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "ts": _now_iso()}
+
+
+def _doi_route_license(form) -> str | None:
+    """The licence the DOI-route author chose for the published article
+    (2026-09-29). The preprint keeps its own licence; authors keep the copyright
+    on arXiv (except under CC0) and Zenodo, so the choice is theirs. None when
+    the form sent none (an older page or API client): the preprint's licence is
+    then used, as before."""
+    raw = form.get("license")
+    raw = raw.strip().lower() if isinstance(raw, str) else ""
+    if not raw:
+        return None
+    if raw not in ALLOWED_LICENSES:
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": [f"license must be one of {sorted(ALLOWED_LICENSES)}"]})
+    return raw
 
 
 async def _preprint_from_form(form) -> dict | None:
@@ -1124,6 +1142,7 @@ async def api_submit(request: Request):
         # the form's redirect on success).
         _validate_doi_shape(doi)
     preprint = None if has_doi else await _preprint_from_form(form)
+    article_license = _doi_route_license(form) if has_doi else None
 
     sub_id = _allocate_sub_id()
     sub_dir = SUBMISSIONS_ROOT / sub_id
@@ -1141,7 +1160,7 @@ async def api_submit(request: Request):
         title = "(deferred — resolving from DOI)"
         abstract = ""
         keywords: list = []
-        license_id = ""
+        license_id = article_license or ""
         creators = [{"name": submitter["name"], "orcid": submitter["orcid"]}]
         publication_date = _now_iso()[:10]
         resource_type = None
@@ -1260,6 +1279,7 @@ async def api_submit(request: Request):
         "related_identifiers": related_identifiers,
         "code_data": code_data or {"available": None, "url": None},
         "preprint_doi": preprint["doi"] if preprint else None,
+        "article_license": article_license,
         "preprint_meta": preprint,
         "pdf": {
             "filename": "paper.pdf",
