@@ -86,6 +86,26 @@ check(bool(x) and "isSupplementedBy" in x, "report-paper deposits carry the rela
 x = build(dict(BASE, code_data={"available": True, "url": "https://example.org/data?x=1&y=2"}))
 check(bool(x) and "x=1&amp;y=2" in x, "a link with an ampersand is escaped and still validates")
 
+print("3. the journal title DOI (no ISSN yet)")
+import config  # noqa: E402
+saved = getattr(config, "CROSSREF_JOURNAL_DOI", None)
+try:
+    config.CROSSREF_JOURNAL_DOI = ""
+    x = build(dict(BASE))
+    jm = x[x.find("<journal_metadata"):x.find("</journal_metadata>")]
+    check(bool(x) and "<doi_data" not in jm, "unset: journal_metadata carries no doi_data (the deposit as before)")
+    config.CROSSREF_JOURNAL_DOI = "10.67697/persistence"
+    x = build(dict(BASE, code_data={"available": True, "url": ZEN}))
+    jm = x[x.find("<journal_metadata"):x.find("</journal_metadata>")]
+    check(bool(x) and "<doi>10.67697/persistence</doi>" in jm and "<resource>https://icsacinstitute.org/journal/</resource>" in jm,
+          "set: journal_metadata carries the title DOI and the journal page, and validates")
+    check(x.count("<doi>10.67697/icsac.2026.099</doi>") == 1, "the article keeps its own DOI")
+finally:
+    if saved is None:
+        delattr(config, "CROSSREF_JOURNAL_DOI") if hasattr(config, "CROSSREF_JOURNAL_DOI") else None
+    else:
+        config.CROSSREF_JOURNAL_DOI = saved
+
 print()
 if failures:
     print(f"FAILED: {len(failures)}")

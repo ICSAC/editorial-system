@@ -471,7 +471,16 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
         issn = _cfg("CROSSREF_JOURNAL_ISSN", "")
         if issn:
             _sub(jm, "issn", issn, attrib={"media_type": "electronic"})
-        volume = str(_cfg("CROSSREF_JOURNAL_VOLUME", "") or "").strip()
+        # Without an ISSN, Crossref requires a journal title-level DOI (TEST
+        # deposit 2026-09-29: "Persistence must deposit with an ISSN and/or
+        # journal title DOI"). The title DOI rides in every article deposit
+        # and stays when the ISSN is added. Empty = no journal doi_data.
+        journal_doi = str(_cfg("CROSSREF_JOURNAL_DOI", "") or "").strip()
+        if journal_doi:
+            jd = _sub(jm, "doi_data")
+            _sub(jd, "doi", journal_doi)
+            _sub(jd, "resource", _cfg("CROSSREF_JOURNAL_URL", "https://icsacinstitute.org/journal/"))
+        volume =str(_cfg("CROSSREF_JOURNAL_VOLUME", "") or "").strip()
         if volume:
             # journal_issue requires a publication_date: the volume's online
             # year from config, else the article's own year.
