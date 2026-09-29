@@ -335,17 +335,44 @@ def preprint_doi(submission: dict) -> Optional[str]:
     return preprint_check.normalize(ref) if ref else None
 
 
+_DOI_LINK = re.compile(r"^https?://(?:dx\.)?doi\.org/(10\.\d{4,9}/\S+)$", re.IGNORECASE)
+
+
+def code_data_relation(submission: dict) -> Optional[tuple[str, str]]:
+    """(identifier-type, identifier) for the author's code and data archive,
+    or None. A doi.org link is registered as the DOI it resolves; any other
+    public link (GitHub, a lab page) as a URI. ICSAC links to the archive; the
+    author hosts it (policy 2026-09-28)."""
+    import publications
+    url = publications.code_data_url(submission)
+    if not url:
+        return None
+    m = _DOI_LINK.match(url)
+    if m:
+        return ("doi", m.group(1))
+    return ("uri", url)
+
+
 def _relations(parent: ET.Element, submission: dict) -> None:
-    """rel:program with hasPreprint -> the preprint's DOI (schema order: after
-    the licence program, before doi_data)."""
+    """rel:program (schema order: after the licence program, before doi_data)
+    with up to two related items: hasPreprint -> the preprint's DOI, and
+    isSupplementedBy -> the author's code and data archive (2026-09-29), so the
+    archive is found from the article's own Crossref record."""
     pre = preprint_doi(submission)
-    if not pre:
+    sup = code_data_relation(submission)
+    if not pre and not sup:
         return
     prog = ET.SubElement(parent, _q("program", REL_NS))
-    item = ET.SubElement(prog, _q("related_item", REL_NS))
-    rel = ET.SubElement(item, _q("intra_work_relation", REL_NS),
-                        {"relationship-type": "hasPreprint", "identifier-type": "doi"})
-    rel.text = pre
+    if pre:
+        item = ET.SubElement(prog, _q("related_item", REL_NS))
+        rel = ET.SubElement(item, _q("intra_work_relation", REL_NS),
+                            {"relationship-type": "hasPreprint", "identifier-type": "doi"})
+        rel.text = pre
+    if sup:
+        item = ET.SubElement(prog, _q("related_item", REL_NS))
+        rel = ET.SubElement(item, _q("inter_work_relation", REL_NS),
+                            {"relationship-type": "isSupplementedBy", "identifier-type": sup[0]})
+        rel.text = sup[1]
 
 
 def _doi_data(parent: ET.Element, doi: str, landing: str, pdf_url: Optional[str]) -> None:
