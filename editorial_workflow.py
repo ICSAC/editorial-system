@@ -513,7 +513,17 @@ def main():
         sys.exit(rc)
 
     elif args.command == "email":
-        import time
+        # Retired 2026-09-29 (owner's call): these letters described the
+        # 2026-05 Zenodo-community model (Google-form sign-up, "Founding Member
+        # status", submitting through the Zenodo community) and contradicted
+        # the site. Every author letter now comes from the site route
+        # (intake/decide.sh -> intake/notify_author.py); the templates stay
+        # in templates/ as history.
+        print("The Zenodo-community letters were retired on 2026-09-29. Author mail is sent by the "
+              "site route: intake/decide.sh <id> <accept|revise|scope_reject>. Nothing sent.",
+              file=sys.stderr)
+        sys.exit(2)
+        import time  # noqa: E402  (unreachable, kept so the block below still parses)
         review_data = submission_intake.ingest_doi(args.doi)
 
         def _deliver(label: str, rendered: str, send_fn) -> bool:
