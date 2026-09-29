@@ -69,12 +69,12 @@ try:
     }]))
     pub.WEBSITE_REPO = str(tmp)   # the upsert is a no-op without a repo path
     pub.REGISTRY_PATH = str(reg)
-    out = pub.upsert_entry({"title": "Old paper", "authors": ["A. Author"], "doi": "10.5281/zenodo.1",
+    out = pub.upsert_entry(approved=True, proto={"title": "Old paper", "authors": ["A. Author"], "doi": "10.5281/zenodo.1",
                             "source": "zenodo-community", "promotion_opt_out": True})
     check(out.get("sub_id") == "ICSAC-SUB-00001" and out.get("ssrn_id") == "123"
           and out.get("license_url", "").endswith("by/4.0/"), "registry: an update keeps sub_id, ssrn_id, licence")
     check(out.get("promotion_opt_out") is True, "registry: an update takes the new exclusion")
-    new = pub.upsert_entry({"title": "New paper", "authors": ["B. Author"], "doi": "10.67697/icsac.2026.007",
+    new = pub.upsert_entry(approved=True, proto={"title": "New paper", "authors": ["B. Author"], "doi": "10.67697/icsac.2026.007",
                             "source": "submission-pdf", "sub_id": "ICSAC-SUB-00007",
                             "license_url": "https://creativecommons.org/licenses/by/4.0/",
                             "promotion_exclusions": ["social"], "persistence_opt_out": True})
