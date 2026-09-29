@@ -3,7 +3,8 @@
 Origin-trust is enforced by HMAC over body+timestamp using a shared
 secret known only to the upstream proxy (CF Pages Function) and this
 handler; the handler is bound to a private interface and only reachable
-through that proxy.
+through that proxy. On /api/submit the signature also covers the
+verified-identity headers (ORCID, name, test tier); see _verify_hmac.
 
 Endpoints:
   POST /api/submit                    — multipart form + PDF, HMAC-gated
@@ -70,6 +71,14 @@ MAX_PDF_BYTES = int(os.environ.get(
 ))  # default 100 MB — matches the Cloudflare Pages free-tier request cap
 HMAC_SECRET = os.environ.get("INTAKE_HMAC_SECRET", "").encode()
 HMAC_MAX_SKEW_SEC = 300
+# /api/submit trusts the verified-identity headers the Pages Function sets, so
+# its signature must cover them (signature v2, 2026-09-29): without that, a
+# signed body could be replayed inside the skew window under another ORCID,
+# name or test tier. v2 signs "icsac-v2\n<ts>\n<orcid>\n<name>\n<tier>\n" + body,
+# each header exactly as sent ("" when absent). INTAKE_SUBMIT_SIG=both also
+# accepts the body-only v1 form on /api/submit, for a deploy window only.
+SUBMIT_SIG_MODE = os.environ.get("INTAKE_SUBMIT_SIG", "v2").strip().lower()
+IDENTITY_HEADERS = ("x-icsac-auth-orcid", "x-icsac-auth-name", "x-icsac-test-tier")
 
 ALLOWED_LICENSES = {"cc-by-4.0", "cc-by-sa-4.0", "cc0-1.0"}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -288,14 +297,28 @@ def _tlog(msg: str) -> None:
     print(f"[TEST] {msg}", flush=True)
 
 
-def _verify_hmac(request: Request, body: bytes) -> None:
-    """Reject request unless X-ICSAC-Signature + Timestamp validate."""
+def _v2_signed_message(ts_header: str, headers, body: bytes) -> bytes:
+    """The bytes a v2 signature covers: version, timestamp, identity headers, body."""
+    vals = [headers.get(h, "") for h in IDENTITY_HEADERS]
+    for v in vals:
+        if "\n" in v or "\r" in v or not v.isascii():
+            raise HTTPException(401, "bad identity header")
+    return ("\n".join(["icsac-v2", ts_header, *vals]) + "\n").encode() + body
+
+
+def _verify_hmac(request: Request, body: bytes, *, bind_identity: bool = False) -> str:
+    """Reject request unless X-ICSAC-Signature + Timestamp validate.
+
+    Returns the signature version that verified ("v1" or "v2"). With
+    bind_identity (the submit endpoint), a v1 signature, which covers the body
+    only, is refused unless INTAKE_SUBMIT_SIG=both.
+    """
     if not HMAC_SECRET:
         raise HTTPException(500, "intake misconfigured: HMAC secret missing")
 
     sig_header = request.headers.get("x-icsac-signature", "")
     ts_header = request.headers.get("x-icsac-timestamp", "")
-    if not sig_header.startswith("sha256=") or not ts_header:
+    if not ts_header or not (sig_header.startswith("sha256=") or sig_header.startswith("v2=")):
         raise HTTPException(401, "missing signature")
 
     try:
@@ -305,11 +328,18 @@ def _verify_hmac(request: Request, body: bytes) -> None:
     if abs(time.time() - ts) > HMAC_MAX_SKEW_SEC:
         raise HTTPException(401, "stale signature")
 
-    expected = hmac.new(
-        HMAC_SECRET, f"{ts}.".encode() + body, hashlib.sha256
-    ).hexdigest()
-    if not hmac.compare_digest(expected, sig_header[len("sha256="):]):
+    if sig_header.startswith("v2="):
+        version, given = "v2", sig_header[len("v2="):]
+        message = _v2_signed_message(ts_header, request.headers, body)
+    else:
+        if bind_identity and SUBMIT_SIG_MODE != "both":
+            raise HTTPException(401, "signature does not cover the identity headers")
+        version, given = "v1", sig_header[len("sha256="):]
+        message = f"{ts}.".encode() + body
+    expected = hmac.new(HMAC_SECRET, message, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, given):
         raise HTTPException(401, "bad signature")
+    return version
 
 
 MAX_CREATORS = 50
@@ -1078,7 +1108,8 @@ async def api_submit(request: Request):
     if len(raw_body) > MAX_PDF_BYTES + 64 * 1024:
         raise HTTPException(413,
             f"request body exceeds {MAX_PDF_BYTES // (1024*1024)} MB cap")
-    _verify_hmac(request, raw_body)
+    sig_version = _verify_hmac(request, raw_body, bind_identity=True)
+    print(f"intake: /api/submit signature {sig_version}", flush=True)
 
     form = await request.form()
     _reject_duplicate_fields(form, ("orcid", "name", "email"))
