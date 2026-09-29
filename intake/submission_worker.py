@@ -349,7 +349,8 @@ def _slug(title: str) -> str:
 
 
 def _scrubbed_report_pair(sub_id: str, title: str,
-                          *, tier: int = 1) -> tuple[str, str]:
+                          *, tier: int = 1,
+                          screen_events: list | None = None) -> tuple[str, str]:
     """Read the saved review markdown + RQC, redact them, return as a
     (panel_md, rqc_md) tuple ready for PDF rendering and attachment.
 
@@ -378,6 +379,8 @@ def _scrubbed_report_pair(sub_id: str, title: str,
             parsed = redaction.parse_review_file(str(review_md_path))
             public_md = redaction.build_public_markdown(parsed)
             redaction.assert_clean(public_md, artifact_path=str(review_md_path))
+            if screen_events is not None:
+                screen_events.extend(parsed.self_id_events)
         except Exception as exc:
             print(f"  redaction failed for {sub_id}: {exc}", file=sys.stderr)
             _alert_remote(
@@ -400,6 +403,8 @@ def _scrubbed_report_pair(sub_id: str, title: str,
             public_rqc = redaction.build_public_rqc_markdown(parsed_rqc)
             redaction.assert_rqc_clean(public_rqc,
                                        artifact_path=str(rqc_md_path))
+            if screen_events is not None:
+                screen_events.extend(parsed_rqc.self_id_events)
         except Exception as exc:
             print(f"  RQC redaction failed for {sub_id}: {exc}", file=sys.stderr)
             _alert_remote(
@@ -635,7 +640,29 @@ def _email_decision(sub_id: str, sub_dir: Path, verdict: str,
     source = submission.get("source") or "upload"
     source_ref = submission.get("doi") or submission.get("source_ref") or ""
 
-    panel_md, rqc_md = _scrubbed_report_pair(sub_id, title, tier=tier)
+    screen_events: list = []
+    panel_md, rqc_md = _scrubbed_report_pair(sub_id, title, tier=tier,
+                                             screen_events=screen_events)
+    if screen_events:
+        # A reviewer or the RQC named its own model or seat in prose; the
+        # screen rewrote or dropped those sentences in the PDFs. The curator
+        # reads the PDFs before sending (2026-09-29, audit item 12f).
+        summary = redaction.format_self_id_events(screen_events)
+        _audit({"sub_id": sub_id, "event": "self_id_screened",
+                "summary": summary.splitlines()[0]},
+               test_mode=tier in (2, 3))
+        print(f"  self-identification screened for {sub_id}: {summary.splitlines()[0]}",
+              file=sys.stderr)
+        if tier == 1:
+            try:
+                notify.send_to_curator(
+                    f"Reviewer self-identification screened in {sub_id}\n"
+                    f"{summary}\n"
+                    "Read the panel and RQC PDFs in the draft before sending.",
+                    parse_mode=None,
+                )
+            except Exception as exc:
+                print(f"curator self-id ping failed: {exc}", file=sys.stderr)
 
     state_path = sub_dir / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
