@@ -28,7 +28,10 @@ from pathlib import Path
 import weasyprint
 import pypdf
 
-SITE = Path(os.environ.get("ICSAC_WEBSITE_REPO") or "/home/orangepi/Desktop/icsac/icsacinstitute.org")
+_SITE = os.environ.get("ICSAC_WEBSITE_REPO")
+if not _SITE:
+    sys.exit("set ICSAC_WEBSITE_REPO to the website checkout (the folder holding src/data/accepted.json)")
+SITE = Path(_SITE)
 LOGO = SITE / "public" / "logo_trans_ICSAC_notext.png"
 ACCEPTED = SITE / "src" / "data" / "accepted.json"
 OUT_DIR = SITE / "public" / "papers"
