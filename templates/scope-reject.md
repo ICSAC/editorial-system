@@ -14,7 +14,7 @@ This is not a judgment on the work's merit on its own terms. It is a statement t
 
 ## About the review process
 
-This decision was reached through ICSAC's open review process — a multi-reviewer panel with human curator oversight. The review criteria, including scope, are published openly at [icsacinstitute.org](https://icsacinstitute.org).
+This decision was reached through ICSAC's open review process — a multi-reviewer panel with curation team oversight. The review criteria, including scope, are published openly at [icsacinstitute.org](https://icsacinstitute.org).
 
 If you believe this scope determination is in error, contact info@icsacinstitute.org with specific objections and we will re-evaluate.
 

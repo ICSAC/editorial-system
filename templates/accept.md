@@ -23,11 +23,11 @@ Or reference your inclusion in your own words:
 
 > "Published in the ICSAC Community for Complexity Science and Advanced Computing"
 
-> "Reviewed and accepted by ICSAC's open review process — multi-reviewer panel with human curator oversight"
+> "Reviewed and accepted by ICSAC's open review process — multi-reviewer panel with curation team oversight"
 
 ## About the review
 
-Your submission was evaluated through ICSAC's open review process — a multi-reviewer panel scoring domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal — with oversight by the curation team. AI tooling helps the panel draft and structure each review; final acceptance decisions rest with the curation team. A copy of your review report is available upon request.
+Your submission was evaluated through ICSAC's open review process — a multi-reviewer panel scoring domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal — with oversight by the curation team. AI tooling helps the panel draft and structure each review; final acceptance decisions rest with the curation team. The full panel report and the Review Quality Control audit are published with the record at the permanent URL above.
 
 ## Rights and licensing
 

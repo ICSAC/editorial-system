@@ -16,7 +16,7 @@ If a particular point of feedback is one you disagree with, you may address it i
 
 ## About the review process
 
-ICSAC's review process is open and transparent. Reviews are produced by a multi-reviewer panel scoring domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal. AI tooling helps the panel draft and structure each review; final decisions rest with human curators. Full criteria are documented at https://icsacinstitute.org.
+ICSAC's review process is open and transparent. Reviews are produced by a multi-reviewer panel scoring domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal. AI tooling helps the panel draft and structure each review; final decisions rest with the curation team. Full criteria are documented at https://icsacinstitute.org.
 
 If you believe this review contains errors or mischaracterizes your work, reply to this comment thread and we will re-evaluate.
 
