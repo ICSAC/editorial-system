@@ -98,6 +98,136 @@ FORBIDDEN_PANEL_PATTERNS: tuple[str, ...] = (
     r"(?i)\b(?:claude|anthropic|gpt|chatgpt|openai|gemini|gemma|qwen|deepseek|llama|mistral|nemotron|sonnet|opus)[- ](?:position|seat|slot|reviewer)s?\b",
 )
 
+# --------------------------------------------------------------------------
+# Reviewer self-identification screen (2026-09-29)
+# --------------------------------------------------------------------------
+#
+# A reviewer or the RQC can name its own model or its seat in prose ("As an AI
+# language model, I ...", "I am Claude", "this reviewer (Gemini)", "the reviewer
+# in seat 3"). The screen runs over every prose field of the public panel and
+# RQC records before assembly: a sentence that can lose the phrase and still
+# read is rewritten to neutral wording; a sentence that cannot is dropped, and
+# every event is returned so the caller can tell the curator. Text inside
+# double quotes is a quotation from the paper and is left alone: a paper that
+# studies model self-reports may quote "I am ChatGPT" and that is its subject.
+#
+# Bare "position N" is not screened: papers talk about sequence positions.
+
+_MODEL_NAMES = (
+    r"claude|anthropic|chatgpt|gpt(?:-?\d[\w.]*)?|openai|gemini|gemma|llama|qwen"
+    r"|deepseek|mistral|mixtral|nemotron|sonnet|opus|grok|kimi|glm(?:-?\d[\w.]*)?"
+    r"|minimax|hermes|command[- ]r|phi-?\d"
+)
+_AI_KIND = (
+    r"(?:ai|a\.i\.|artificial[- ]intelligence|large[- ]language|llm|language)"
+    r"(?:[- ](?:language|based))?[- ]?(?:model|assistant|system|reviewer)"
+)
+_ORDINAL = r"(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+(?:st|nd|rd|th))"
+
+# (pattern, replacement): the sentence survives the rewrite.
+_SELF_ID_REWRITES: tuple[tuple[re.Pattern, str], ...] = (
+    # "As an AI language model, I ..." -> "I ..."
+    (re.compile(rf"(?i)^\s*as\s+an?\s+{_AI_KIND}s?\s*(?:\([^)]*\))?\s*,\s*"), ""),
+    # "As Claude, I ..." / "As GPT-4o (the second reviewer), ..." -> "I ..."
+    (re.compile(rf"(?i)^\s*as\s+(?:{_MODEL_NAMES})(?:[- ][\w.]+)?\s*(?:\([^)]*\))?\s*,\s*"), ""),
+    # "this reviewer (GPT-4o)" / "Reviewer 3 (Gemini)" -> drop the parenthetical
+    (re.compile(rf"(?i)\b((?:this|the|a|one|another|each)\s+reviewer|reviewer\s+\d+)\s*\((?=[^)]*\b(?:{_MODEL_NAMES})\b)[^)]*\)"), r"\1"),
+    # "the reviewer in seat 3" / "the reviewer at panel position 2" -> "one reviewer"
+    (re.compile(r"(?i)\b(?:the|this|a)\s+reviewer\s+(?:in|at|from|occupying)\s+(?:panel\s+)?(?:position|seat|slot)\s*#?\s*\d+\b"), "one reviewer"),
+    # "the seat-3 reviewer" / "panel position 2 reviewer" -> "one reviewer"
+    (re.compile(r"(?i)\b(?:the\s+)?(?:panel\s+)?(?:position|seat|slot)[- ]?#?\s*\d+[- ]reviewer\b"), "one reviewer"),
+)
+
+# A sentence still matching any of these after the rewrites is dropped.
+_SELF_ID_DROP: tuple[re.Pattern, ...] = (
+    re.compile(rf"(?i)\bI(?:'m|’m|\s+am)\s+(?:an?\s+)?(?:{_AI_KIND}|ai\b|artificial[- ]intelligence\b)"),
+    re.compile(rf"(?i)\bI(?:'m|’m|\s+am)\s+(?:{_MODEL_NAMES})\b"),
+    re.compile(rf"(?i)\bI(?:'m|’m|\s+am)\s+(?:the\s+)?{_ORDINAL}\s+(?:reviewer|seat|position|panelist|panel\s+member)\b"),
+    re.compile(rf"(?i)\bas\s+an?\s+{_AI_KIND}\b[^.!?]{{0,80}}\b(?:I|me|my)\b"),
+    re.compile(rf"(?i)\b(?:I|me|my)\b[^.!?]{{0,80}}\bas\s+an?\s+{_AI_KIND}\b"),
+    re.compile(rf"(?i)\b(?:this|the)\s+reviewer\s*\(\s*(?:{_MODEL_NAMES})\b"),
+    re.compile(r"(?i)\b(?:panel|reviewer)\s+(?:position|seat|slot)\s*#?\s*\d+\b"),
+    re.compile(r"(?i)\bseat\s*#?\s*\d+\b"),
+    re.compile(r"(?i)\b(?:position|slot)\s*#?\s*\d+\s+(?:on|of|in)\s+(?:the|this)\s+panel\b"),
+)
+
+# First-person self-identification that must never reach a public record: the
+# grep-gate backstop for any path that skipped the screen.
+FORBIDDEN_SELF_ID_PATTERNS: tuple[str, ...] = (
+    _SELF_ID_DROP[0].pattern,
+    _SELF_ID_DROP[1].pattern,
+)
+
+_QUOTED_SPAN = re.compile(r'"[^"\n]{0,600}"|“[^”\n]{0,600}”|&quot;.{0,600}?&quot;', re.DOTALL)
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"“(\[])")
+
+
+def _mask_quotes(text: str) -> str:
+    """Blank quoted spans with same-length filler so offsets survive."""
+    return _QUOTED_SPAN.sub(lambda m: "\x00" * len(m.group(0)), text)
+
+
+def _rewrite_outside_quotes(sentence: str, pat: re.Pattern, repl: str) -> str:
+    """Apply one rewrite to the spans that lie outside quotations."""
+    masked = _mask_quotes(sentence)
+    for m in reversed(list(pat.finditer(masked))):
+        # Group text is taken from the original sentence, never the mask.
+        sub = pat.sub(repl, sentence[m.start():m.end()], count=1)
+        sentence = sentence[:m.start()] + sub + sentence[m.end():]
+    return sentence
+
+
+def screen_self_identification(text: str, where: str = "") -> tuple[str, list[dict]]:
+    """Rewrite or drop reviewer self-identification in one prose field.
+
+    Returns (screened_text, events). Each event is
+    {"where", "action": "rewritten"|"dropped", "sentence"}; the sentence is
+    the original, for the curator only. Text with no hit comes back unchanged,
+    byte for byte.
+    """
+    if not text:
+        return text, []
+    sentences = _SENTENCE_SPLIT.split(text)
+    events: list[dict] = []
+    kept: list[str] = []
+    changed = False
+    for s in sentences:
+        new = s
+        for pat, repl in _SELF_ID_REWRITES:
+            new = _rewrite_outside_quotes(new, pat, repl)
+        masked = _mask_quotes(new)
+        if any(p.search(masked) for p in _SELF_ID_DROP):
+            events.append({"where": where, "action": "dropped", "sentence": s.strip()})
+            changed = True
+            continue
+        if new != s:
+            stripped = new.lstrip()
+            if stripped and stripped[0].islower() and s.lstrip()[:1].isupper():
+                new = new[: len(new) - len(stripped)] + stripped[0].upper() + stripped[1:]
+            events.append({"where": where, "action": "rewritten", "sentence": s.strip()})
+            changed = True
+        kept.append(new)
+    if not changed:
+        return text, []
+    return " ".join(k.strip() for k in kept if k.strip()), events
+
+
+def format_self_id_events(events: list[dict], limit: int = 6) -> str:
+    """Curator-facing summary of screen events (never author-facing)."""
+    dropped = sum(1 for e in events if e["action"] == "dropped")
+    rewritten = len(events) - dropped
+    lines = [f"{dropped} sentence(s) dropped, {rewritten} rewritten"]
+    for e in events[:limit]:
+        lines.append(f"- {e['action']} [{e['where']}]: {e['sentence'][:200]}")
+    if len(events) > limit:
+        lines.append(f"- ... and {len(events) - limit} more")
+    return "\n".join(lines)
+
+
+# Placeholder when a whole field was self-identification and nothing survives.
+SELF_ID_WITHHELD = "Withheld from the public record."
+
+
 FORBIDDEN_EXFIL_PATTERNS: tuple[str, ...] = (
     # Absolute filesystem paths likely pointing at our hosts
     r"/home/orangepi\b",
@@ -176,6 +306,8 @@ class ParsedReview:
     disagreement: bool
     dimension_rows: list[tuple[str, str, list[str]]] = field(default_factory=list)
     reviewers: list[dict] = field(default_factory=list)
+    # Filled by build_public_markdown: what the self-identification screen did.
+    self_id_events: list[dict] = field(default_factory=list)
 
 
 def _parse_frontmatter(body: str) -> tuple[dict, str]:
@@ -359,9 +491,14 @@ def build_public_markdown(parsed: ParsedReview) -> str:
     # unchanged, so the rendered landing page gets native browser-handled
     # expand/collapse on each reviewer without any JavaScript.
     import html as _html
+    parsed.self_id_events = []
     for idx, r in enumerate(valid_reviewers, start=1):
         rec = _html.escape(r["recommendation"])
-        summary = _html.escape(_rewrite_rubric_filenames(r["summary"]))
+        summary_text, ev = screen_self_identification(r["summary"], f"Reviewer {idx} summary")
+        parsed.self_id_events.extend(ev)
+        if ev and not summary_text:
+            summary_text = SELF_ID_WITHHELD
+        summary = _html.escape(_rewrite_rubric_filenames(summary_text))
         lines.append(f'<details class="reviewer-detail">')
         lines.append(f'<summary><strong>Reviewer {idx}</strong> — {rec}</summary>')
         lines.append("")
@@ -369,9 +506,13 @@ def build_public_markdown(parsed: ParsedReview) -> str:
         if r["dimensions"]:
             lines.append("<ul>")
             for label, score, just in r["dimensions"]:
+                just_text, ev = screen_self_identification(just, f"Reviewer {idx} {label}")
+                parsed.self_id_events.extend(ev)
+                if ev and not just_text:
+                    just_text = SELF_ID_WITHHELD
                 lines.append(
                     f'  <li><strong>{_html.escape(label)}</strong> '
-                    f'({_html.escape(score)}): {_html.escape(_rewrite_rubric_filenames(just))}</li>'
+                    f'({_html.escape(score)}): {_html.escape(_rewrite_rubric_filenames(just_text))}</li>'
                 )
             lines.append("</ul>")
         lines.append("</details>")
@@ -508,6 +649,8 @@ def scan(text: str) -> ScrubReport:
     fatal.extend(_find_substring_hits(text, FORBIDDEN_SECRET_PHRASES))
     fatal.extend(_find_regex_hits(text, FORBIDDEN_EXFIL_PATTERNS))
     fatal.extend(_find_regex_hits(text, FORBIDDEN_PANEL_PATTERNS))
+    # Quotations from the paper are masked: a paper may quote a model's self-report.
+    fatal.extend(_find_regex_hits(_mask_quotes(text), FORBIDDEN_SELF_ID_PATTERNS))
     warn = _find_wordboundary_hits(text, SOFT_WARN_TOKENS)
     return ScrubReport(fatal_hits=fatal, warn_hits=warn)
 
@@ -576,6 +719,9 @@ def publish_public_review(
     parsed = parse_review_file(src)
     public_md = build_public_markdown(parsed)
     report_md = assert_clean(public_md, artifact_path=src)
+    if parsed.self_id_events:
+        print("  redaction: self-identification screened in " + src + ": "
+              + format_self_id_events(parsed.self_id_events).splitlines()[0])
 
     public_html = render_public_html(public_md)
     assert_clean(public_html, artifact_path=f"{src} (rendered html)")
@@ -638,6 +784,8 @@ class ParsedRQC:
     # Each slot: {"reviewer": str, "errored": bool,
     #             "dimensions": [(label, score, justification), ...]}
     slots: list[dict] = field(default_factory=list)
+    # Filled by build_public_rqc_markdown: what the self-identification screen did.
+    self_id_events: list[dict] = field(default_factory=list)
 
 
 def _parse_rqc_slots(body: str) -> list[dict]:
@@ -756,6 +904,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     injection_indicators dimension under any spelling. ``assert_rqc_clean``
     enforces this before the redaction writes anything to the site.
     """
+    parsed.self_id_events = []
     status_line = (
         "Review Quality Control: flagged — reviewed by the curation team before acceptance."
         if parsed.flag
@@ -824,6 +973,10 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
             # Singular AND plural forms both count.
             if re.search(r"\breviewers?\s+\d+\b", cl):
                 continue
+            c, ev = screen_self_identification(c, "RQC note")
+            parsed.self_id_events.extend(ev)
+            if not c:
+                continue
             safe_concerns.append(c)
         if safe_concerns:
             lines.extend(["### Notes", ""])
@@ -869,6 +1022,11 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         lines.append("<ul>")
         for dim in RQC_PUBLIC_DIMENSIONS:
             score, just = by_label.get(dim, ("—", ""))
+            if just:
+                just, ev = screen_self_identification(just, f"RQC {label} {dim}")
+                parsed.self_id_events.extend(ev)
+                if ev and not just:
+                    just = SELF_ID_WITHHELD
             just_clean = _rewrite_rubric_filenames(just) if just else "No justification recorded."
             lines.append(
                 f'  <li><strong>{_html.escape(dim)}</strong> '
@@ -931,6 +1089,9 @@ def publish_public_rqc(
     parsed = parse_rqc_file(src)
     public_md = build_public_rqc_markdown(parsed)
     report_md = assert_rqc_clean(public_md, artifact_path=src)
+    if parsed.self_id_events:
+        print("  redaction/rqc: self-identification screened in " + src + ": "
+              + format_self_id_events(parsed.self_id_events).splitlines()[0])
 
     public_html = render_public_html(public_md)
     assert_rqc_clean(public_html, artifact_path=f"{src} (rendered html)")
