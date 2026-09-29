@@ -270,7 +270,7 @@ def _render_cover(paper: dict) -> bytes:
   </dl>
 
   <div class="venue">
-    <strong>Reviewed by the ICSAC panel</strong> &mdash; the Institute's open editorial record. The full record &mdash; AI panel reviews, Review Quality Control audit, and curator verdict &mdash; is publicly available at the URL below.
+    <strong>Reviewed by the ICSAC panel</strong> &mdash; the Institute's open editorial record. The full record &mdash; AI panel reviews, Review Quality Control audit, and the curation team&rsquo;s verdict &mdash; is publicly available at the URL below.
   </div>
 
   <div class="record">
