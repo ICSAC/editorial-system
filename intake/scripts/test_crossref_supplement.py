@@ -107,6 +107,34 @@ finally:
     else:
         config.CROSSREF_JOURNAL_DOI = saved
 
+print("4. the Zenodo archive copy follows the Crossref record")
+import repository_deposit as rd  # noqa: E402
+sub = dict(BASE, resource_type="preprint", publication_date="2026-09-29")
+md = rd._build_metadata(sub, external_doi="10.67697/icsac.2026.099")
+check(md.get("upload_type") == "publication" and md.get("publication_type") == "article",
+      "with an ICSAC DOI, a form 'preprint' becomes a journal article")
+check(md.get("journal_title") == getattr(config, "CROSSREF_JOURNAL_TITLE", "Persistence")
+      and md.get("journal_volume") == str(getattr(config, "CROSSREF_JOURNAL_VOLUME", "1")),
+      "it names the journal and the volume from config")
+check(md.get("doi") == "10.67697/icsac.2026.099", "the external DOI still rides on the draft")
+md = rd._build_metadata(dict(sub, resource_type="dataset"), external_doi="10.67697/icsac.2026.099")
+check(md.get("upload_type") == "publication" and md.get("publication_type") == "article",
+      "any form type is overridden once the work is an ICSAC-registered article")
+md = rd._build_metadata(sub)
+check(md.get("publication_type") == "preprint" and "journal_title" not in md,
+      "without an ICSAC DOI (Zenodo mints its own), the author's type stands")
+saved_ct = getattr(config, "CROSSREF_CONTENT_TYPE", None)
+try:
+    config.CROSSREF_CONTENT_TYPE = "report-paper"
+    md = rd._build_metadata(sub, external_doi="10.67697/icsac.2026.099")
+    check(md.get("publication_type") == "report" and "journal_title" not in md,
+          "a report-paper deployment archives a report, with no journal fields")
+finally:
+    if saved_ct is None:
+        delattr(config, "CROSSREF_CONTENT_TYPE")
+    else:
+        config.CROSSREF_CONTENT_TYPE = saved_ct
+
 print()
 if failures:
     print(f"FAILED: {len(failures)}")
