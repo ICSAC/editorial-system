@@ -438,9 +438,18 @@ def download_arxiv_pdf(arxiv_id: str, dest_dir: str = None) -> str | None:
         url, headers={"User-Agent": "ICSAC-pipeline/1.0"}
     )
     try:
+        max_bytes = int(os.environ.get("INTAKE_MAX_PDF_BYTES", str(100 * 1024 * 1024)))
+        total = 0
         with urllib.request.urlopen(req, timeout=120) as resp:
             with open(dest_path, "wb") as out:
                 while chunk := resp.read(8192):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        # the Zenodo path has had this ceiling; arXiv had none (audit 2026-09-29)
+                        out.close()
+                        os.remove(dest_path)
+                        print(f"  Warning: arXiv PDF exceeds {max_bytes // (1024 * 1024)} MB; refused")
+                        return None
                     out.write(chunk)
         # arXiv occasionally returns an HTML "paper not yet available" stub
         # at the PDF URL; reject anything not starting with %PDF-.

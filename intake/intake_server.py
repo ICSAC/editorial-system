@@ -312,6 +312,21 @@ def _verify_hmac(request: Request, body: bytes) -> None:
         raise HTTPException(401, "bad signature")
 
 
+MAX_CREATORS = 50
+MAX_RELATED_IDENTIFIERS = 50
+
+
+def _reject_duplicate_fields(form, keys: tuple[str, ...]) -> None:
+    """One value per identity field. The Pages Function reads the FIRST value of
+    a repeated multipart field (WHATWG FormData.get) while Starlette keeps the
+    LAST, so a body with two `orcid` fields would pass the session check under
+    one iD and be stored under another (audit 2026-09-29)."""
+    dup = [k for k in keys if len(form.getlist(k)) > 1]
+    if dup:
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": [f"{k} was sent more than once" for k in dup]})
+
+
 def _validate_submitter(d: dict) -> dict:
     """Validate the always-required submitter fields. Raises 400 on bad input.
 
@@ -412,6 +427,9 @@ def _parse_creators(raw: str) -> list[dict]:
     if not isinstance(parsed, list):
         raise HTTPException(400, {"error": "validation_failed",
                                   "details": ["creators must be a JSON array"]})
+    if len(parsed) > MAX_CREATORS:
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": [f"at most {MAX_CREATORS} creators"]})
     out = []
     for i, entry in enumerate(parsed):
         if not isinstance(entry, dict):
@@ -450,6 +468,9 @@ def _parse_related_identifiers(raw: str) -> list[dict]:
     if not isinstance(parsed, list):
         raise HTTPException(400, {"error": "validation_failed",
                                   "details": ["related_identifiers must be a JSON array"]})
+    if len(parsed) > MAX_RELATED_IDENTIFIERS:
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": [f"at most {MAX_RELATED_IDENTIFIERS} related identifiers"]})
     out = []
     for i, entry in enumerate(parsed):
         if not isinstance(entry, dict):
@@ -1060,6 +1081,7 @@ async def api_submit(request: Request):
     _verify_hmac(request, raw_body)
 
     form = await request.form()
+    _reject_duplicate_fields(form, ("orcid", "name", "email"))
 
     submitter = _validate_submitter({
         "name": form.get("name"),
@@ -1414,6 +1436,7 @@ async def api_sponsor_logo(request: Request):
     _verify_hmac(request, raw_body)
 
     form = await request.form()
+    _reject_duplicate_fields(form, ("orcid", "name", "email"))
     session_id = (form.get("session_id") or "").strip() if isinstance(form.get("session_id"), str) else ""
     logo = form.get("logo")
     # Starlette's form parser returns starlette.datastructures.UploadFile;

@@ -65,8 +65,12 @@ def _markdown_to_plaintext(md: str) -> str:
 
 
 def _markdown_to_html(md: str) -> str:
-    """Render markdown body to HTML with a branded wrapper and the hosted logo."""
-    inner = markdown.markdown(md, extensions=["extra", "sane_lists"])
+    """Render markdown body to HTML with a branded wrapper and the hosted logo.
+
+    The templates carry no raw HTML, so every `<` in the body came from a
+    substituted value (a title, a name, a note). It is rendered as text, not
+    as a tag (audit 2026-09-29); the plain-text part is untouched."""
+    inner = markdown.markdown(md.replace("<", "&lt;"), extensions=["extra", "sane_lists"])
     inner = _box_response_section(inner)
     return HTML_WRAPPER.format(logo=LOGO_URL, body=inner)
 

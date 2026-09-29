@@ -13,3 +13,4 @@ python-multipart>=0.0.20,<1.0
 weasyprint==68.1
 pypdf==6.11.0
 lxml>=4.9         # crossref_deposit: schema validation of deposit XML (2026-09-27)
+httpx>=0.27,<1.0  # intake/sponsor_logo: Stripe checkout-session lookup (declared 2026-09-29)

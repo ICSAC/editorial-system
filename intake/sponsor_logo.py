@@ -159,6 +159,16 @@ def _verify_sponsor_session(session: dict[str, Any]) -> dict[str, Any]:
             "session's subscription is not a Sponsor tier — logo upload only "
             "available for ICSAC Sponsor subscribers.",
         )
+    # A paid checkout session outlives the subscription it started; the listing
+    # may change only while that subscription is live (audit 2026-09-29).
+    sub_status = subscription.get("status")
+    if sub_status not in (None, "active", "trialing"):
+        raise HTTPException(403, f"subscription is {sub_status}; the sponsor listing can be "
+                                 "changed only while the subscription is active.")
+    _cpe = subscription.get("current_period_end")
+    if isinstance(_cpe, int) and _cpe < time.time() - 86400:
+        raise HTTPException(403, "the subscription period has ended; the sponsor listing can be "
+                                 "changed only while the subscription is active.")
 
     # custom_fields is a list of {key, label, type, text:{value}, ...}
     display_name = ""
