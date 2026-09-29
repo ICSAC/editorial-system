@@ -24,6 +24,7 @@ import fcntl
 import hashlib
 import json
 import os
+import time
 import re
 import subprocess
 import sys
@@ -120,8 +121,42 @@ def _write_state(sub_dir: Path, **fields) -> dict:
     state_path = sub_dir / "state.json"
     data = json.loads(state_path.read_text()) if state_path.exists() else {}
     data.update(fields)
-    state_path.write_text(json.dumps(data, indent=2))
+    # tmp + rename: the public status endpoint reads this file (audit 2026-09-29)
+    tmp = state_path.with_name(state_path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, state_path)
     return data
+
+
+# A paper with a decision on record, or in one of these states, is not run again
+# by a stray queue trigger; ICSAC_REPROCESS=1 is the deliberate override.
+_TERMINAL_STATES = {"completed", "completed_email_failed"}
+
+
+_RETRY_SLEEPS = (20, 60, 120)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """A registry that is down is not a record that is missing."""
+    import socket
+    import urllib.error
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in (429, 500, 502, 503, 504)
+    return isinstance(exc, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError))
+
+
+def _fetch_with_retry(fn, what: str):
+    """Call fn(); on a transient failure wait and try again, up to len(_RETRY_SLEEPS)
+    more times, so a Zenodo or arXiv hiccup does not become a terminal
+    'unresolvable' verdict and an author email (audit 2026-09-29)."""
+    for pause in (*_RETRY_SLEEPS, None):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - classified below
+            if pause is None or not _is_transient(exc):
+                raise
+            _log(f"  {what}: {type(exc).__name__}: {exc}; retrying in {pause}s", err=True)
+            time.sleep(pause)
 
 
 def _resolve_pending_doi(sub_id: str, sub_dir: Path,
@@ -148,7 +183,7 @@ def _resolve_pending_doi(sub_id: str, sub_dir: Path,
     if ingest.is_arxiv_ref(doi):
         arxiv_id = ingest.arxiv_ref_to_id(doi)
         try:
-            review_meta = ingest.fetch_arxiv_metadata(arxiv_id)
+            review_meta = _fetch_with_retry(lambda: ingest.fetch_arxiv_metadata(arxiv_id), f"arXiv metadata {arxiv_id}")
         except Exception as exc:
             # Log full detail (with library exception) to journal; pass a
             # sanitized one-liner to the author so transport errors don't
@@ -162,7 +197,7 @@ def _resolve_pending_doi(sub_id: str, sub_dir: Path,
     else:
         record_id = ingest.doi_to_record_id(doi)
         try:
-            metadata = ingest.fetch_metadata(record_id)
+            metadata = _fetch_with_retry(lambda: ingest.fetch_metadata(record_id), f"Zenodo metadata {record_id}")
         except Exception as exc:
             _log(f"  Zenodo metadata fetch failed for {doi}: "
                  f"{type(exc).__name__}: {exc}", err=True)
@@ -742,6 +777,16 @@ def _process_locked(sub_id: str) -> None:
     sub_dir, tier = _resolve_sub_dir(sub_id)
     if not sub_dir.is_dir():
         print(f"  no such submission dir: {sub_dir}", file=sys.stderr)
+        return
+    _prior_p = sub_dir / "state.json"
+    _prior = json.loads(_prior_p.read_text()) if _prior_p.exists() else {}
+    if (_prior.get("decision") or _prior.get("state") in _TERMINAL_STATES) and os.environ.get("ICSAC_REPROCESS") != "1":
+        # Re-running the panel on a decided paper would write in_review over the
+        # decision and raise a second curator request (audit 2026-09-29).
+        _log(f"  {sub_id} is {_prior.get('state')!r} with decision {_prior.get('decision')!r}; "
+             f"not reprocessing (ICSAC_REPROCESS=1 overrides)", err=True)
+        _audit({"sub_id": sub_id, "event": "reprocess_refused", "state": _prior.get("state"),
+                "decision": _prior.get("decision")}, test_mode=tier in (2, 3))
         return
 
     test_mode = tier in (2, 3)

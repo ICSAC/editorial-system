@@ -293,6 +293,32 @@ def send_followup(*, to: str, sub_id: str, title: str, author_name: str,
                                  body_md=body, draft=True)  # Gmail Drafts; the curation team sends
 
 
+def _attachments_sentence(sub_id: str, panel_report_md: str, rqc_md: str) -> str:
+    """Name what is really attached: the RQC PDF is skipped when the audit failed
+    nonfatally, and the old fixed sentence still promised two (audit 2026-09-29)."""
+    panel, rqc = bool((panel_report_md or "").strip()), bool((rqc_md or "").strip())
+    if panel and rqc:
+        return (f"Two PDFs are attached: the full panel report (icsac-review-{sub_id}.pdf) and the "
+                f"Review Quality Control audit (icsac-rqc-{sub_id}.pdf).")
+    if panel:
+        return (f"One PDF is attached: the full panel report (icsac-review-{sub_id}.pdf). The Review "
+                f"Quality Control audit was not produced for this round and follows separately if it is.")
+    return "No PDF is attached to this message; the review record follows separately."
+
+
+def _attachments_block(sub_id: str, panel_report_md: str, rqc_md: str) -> str:
+    panel, rqc = bool((panel_report_md or "").strip()), bool((rqc_md or "").strip())
+    lines = []
+    if panel:
+        lines.append(f"- icsac-review-{sub_id}.pdf — full panel report")
+    if rqc:
+        lines.append(f"- icsac-rqc-{sub_id}.pdf — Review Quality Control audit")
+    if not lines:
+        return "No PDF is attached to this message; the review record follows separately."
+    head = "Two PDFs are attached:" if len(lines) == 2 else "One PDF is attached:"
+    return head + "\n\n" + "\n".join(lines)
+
+
 def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   verdict: str, source: str,
                   panel_report_md: str,
@@ -446,6 +472,8 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
             "as confirmed at submission."),
         "review_pdf_name": f"icsac-review-{sub_id}.pdf",
         "rqc_pdf_name": f"icsac-rqc-{sub_id}.pdf",
+        "attachments_sentence": _attachments_sentence(sub_id, panel_report_md, rqc_md),
+        "attachments_block": _attachments_block(sub_id, panel_report_md, rqc_md),
         "code_claims": "\n\n".join(f'> "{c}"' for c in (code_link_claims or [])) or (
             "> (the availability statement in your manuscript)"),
         "citation_line": citation_line or (

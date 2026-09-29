@@ -71,6 +71,13 @@ LICENSE_URLS = {
 }
 
 
+def _write_json_atomic(path, data) -> None:
+    """state.json is read by the public status endpoint; never let it see half a file."""
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, path)
+
+
 class CrossrefError(RuntimeError):
     """Raised when staging or registration cannot complete. Nothing partial is
     left behind on stage(); register() leaves state.json untouched on failure."""
@@ -736,6 +743,13 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
         raise CrossrefError(f"{sub_dir.name} has no curator ACCEPT on record "
                             f"(state.decision={state.get('decision')!r}); run intake/decide.sh "
                             f"{sub_dir.name} accept first. The machine never decides.")
+    if state.get("state") == "completed_email_failed" and os.environ.get("ICSAC_REGISTER_WITHOUT_NOTICE") != "1":
+        # The acceptance email never left, so the author holds no response link and
+        # the window closed on silence nobody could break (audit 2026-09-29).
+        raise CrossrefError(f"{sub_dir.name}: the acceptance email failed to draft (state completed_email_failed); "
+                            f"the author has no response link. Re-issue it with ICSAC_DECISION_FORCE=1 "
+                            f"intake/decide.sh {sub_dir.name} accept, or set ICSAC_REGISTER_WITHOUT_NOTICE=1 "
+                            f"after telling the author by hand.")
     # The author's word, or the window's close (2026-09-27). Withdraw/hold refuse.
     from intake import author_approval
     ok, why = author_approval.gate(sub_dir, override_window=override_window)
@@ -775,6 +789,11 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
                     xml_bytes = xml_path.read_bytes()
                     validate_xml(xml_bytes)
             if result is None:
+                # A response can land between the gate above and this request; ask once more
+                # right before the step that cannot be undone (audit 2026-09-29).
+                ok, why = author_approval.gate(sub_dir, override_window=override_window)
+                if not ok:
+                    raise CrossrefError(f"{sub_dir.name}: {why} (arrived before the deposit)")
                 batch_id = deposit(xml_bytes, live=True, filename=f"{sub_dir.name}.xml", log=log)
                 ck["crossref_batch_id"] = batch_id; ck["crossref_deposited_at"] = _now_iso(); _save_staged()
                 result = poll_result(batch_id, live=True, expect_doi=doi, log=log)
@@ -790,7 +809,7 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
             state.update({"deposit_doi": doi, "deposit_url": f"https://doi.org/{doi}",
                           "crossref_registered_at": ck["crossref_registered_at"],
                           "crossref_batch_id": ck.get("crossref_batch_id"), "registrar": "crossref"})
-            state_p.write_text(json.dumps(state, indent=2))
+            _write_json_atomic(state_p, state)
         outcome["batch_id"] = ck.get("crossref_batch_id")
 
         # 3. landing page
@@ -809,7 +828,7 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
             _save_staged()
             if archive_url:
                 state["archive_url"] = archive_url
-                state_p.write_text(json.dumps(state, indent=2))
+                _write_json_atomic(state_p, state)
         outcome["archive"] = ck.get("archive_url")
 
         # 5. author notice, DRAFTED
@@ -967,7 +986,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     state = json.loads(state_p.read_text()) if state_p.exists() else {}
     state["publications_slug"] = entry["slug"]
     state["publications_url"] = publications.publications_url(entry["slug"])
-    state_p.write_text(json.dumps(state, indent=2))
+    _write_json_atomic(state_p, state)
     log(f"  crossref: publications entry pushed -> {state['publications_url']}")
     return entry
 

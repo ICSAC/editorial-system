@@ -159,6 +159,13 @@ def main(argv: list[str]) -> int:
               f"Nothing done. If the flag was wrong, run intake/code-check-override.sh {sub_id} "
               f"and decide after the panel.", file=sys.stderr)
         return 3
+    _cur_state = state_pre.get("state")
+    if not force and not held_for_code_link and _cur_state != "awaiting_decision":
+        # revise/scope_reject on a paper the panel has not finished would draft an
+        # author email over a review that does not exist yet (audit 2026-09-29).
+        print(f"{sub_id} is in state {_cur_state!r}, not awaiting a decision. Nothing done. "
+              f"Decide after the panel, or run with ICSAC_DECISION_FORCE=1.", file=sys.stderr)
+        return 3
     code_link_claims = None
     if held_for_code_link and verdict == "revise":
         try:
@@ -459,7 +466,9 @@ def main(argv: list[str]) -> int:
         "decided_by": "curator",
         "decision_note": note or None,
     })
-    state_path.write_text(json.dumps(state, indent=2))
+    _tmp = state_path.with_name(state_path.name + ".tmp")
+    _tmp.write_text(json.dumps(state, indent=2))
+    os.replace(_tmp, state_path)
 
     awaiting = sub_dir / "awaiting-decision.json"
     if awaiting.exists():
