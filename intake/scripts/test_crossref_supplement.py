@@ -63,7 +63,8 @@ x = build(dict(BASE, code_data={"available": True, "url": ZEN}))
 check(bool(x), "an article with a DOI archive validates against the Crossref 5.4.0 schema")
 check('<rel:inter_work_relation relationship-type="isSupplementedBy" identifier-type="doi">10.5281/zenodo.23042786</rel:inter_work_relation>' in x,
       "it carries isSupplementedBy -> the archive DOI")
-check(x.find("<rel:program") < x.find("<doi_data") and x.find("<rel:program") > 0, "the relation sits before doi_data")
+art = x[x.find("<journal_article"):]   # journal_metadata may carry the journal title DOI's own doi_data
+check(0 < art.find("<rel:program") < art.find("<doi_data"), "the relation sits before the article's doi_data")
 check("hasPreprint" not in x, "an upload with no preprint carries no preprint relation")
 
 x = build(dict(BASE, code_data={"available": True, "url": "https://github.com/someone/repo"}))
