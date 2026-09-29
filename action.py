@@ -392,6 +392,21 @@ def register_accepted_paper(record_id: str) -> None:
     metadata = _fetch_record(record_id)
     proto = _extract_registry_entry(record_id, metadata,
                                     source="zenodo-community")
+    if not publications.publish_approved():
+        # Drafted and ready, not published (2026-09-29): no registry entry, no
+        # public review, no stats, no push until the curator approves.
+        path = publications.hold_for_approval(proto, f"Zenodo community accept of {record_id}")
+        try:
+            import notify
+            notify.send_to_curator(
+                f"READY TO PUBLISH (held for your approval): accepted record {record_id}; its "
+                f"/publications entry is saved at {path}. Nothing was published. To publish it: "
+                f"ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO=~/Desktop/icsac/icsacinstitute.org "
+                f"python3 -c 'import action; action.register_accepted_paper(\"{record_id}\")'",
+                parse_mode=None)
+        except Exception as exc:
+            print(f"  curator ping failed: {exc}")
+        return
     entry = publications.upsert_entry(proto)
 
     review_path = _publish_public_review(record_id)

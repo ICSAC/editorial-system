@@ -281,7 +281,7 @@ try:
     (site / "src" / "data" / "accepted.json").write_text("[]")
     pub.WEBSITE_REPO = str(site); pub.REGISTRY_PATH = str(site / "src" / "data" / "accepted.json")
     check(pub.code_data_url(sub) == "https://github.com/example/generator", "registry: helper reads the form link")
-    e = pub.upsert_entry({"title": "T", "authors": ["A"], "doi": "10.67697/icsac.2026.999",
+    e = pub.upsert_entry(approved=True, proto={"title": "T", "authors": ["A"], "doi": "10.67697/icsac.2026.999",
                           "source": "submission-pdf", "code_data_url": pub.code_data_url(sub)})
     check(e.get("code_data_url") == "https://github.com/example/generator", "registry: the entry keeps code_data_url")
     check(pub.code_data_url({"code_data": {"available": False, "url": None}}) is None, "registry: 'no' gives no link")

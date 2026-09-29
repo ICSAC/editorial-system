@@ -108,7 +108,47 @@ def _match_existing(registry: list[dict], proto: dict) -> Optional[int]:
     return None
 
 
-def upsert_entry(proto: dict) -> dict:
+# ── The publish gate (2026-09-29) ─────────────────────────────────────────────
+# The curator's rule: nothing publishes anywhere without his approval; everything
+# else is drafted and ready to go. The writers below (registry, public review,
+# commit + push) refuse unless the caller carries the approval:
+#   * register-doi.sh --live passes approved=True; its typed confirmation IS the approval;
+#   * a hand-run of a legacy path may set ICSAC_PUBLISH_APPROVED=1 in its own environment.
+# No service unit, timer or cron sets ICSAC_PUBLISH_APPROVED. Anything else is HELD:
+# the entry is saved under READY_DIR and nothing is written to the website.
+READY_DIR = os.path.expanduser("~/icsac-submissions/ready-to-publish")
+
+
+def publish_approved(approved: bool = False) -> bool:
+    return bool(approved) or os.environ.get("ICSAC_PUBLISH_APPROVED") == "1"
+
+
+def hold_for_approval(proto: dict, reason: str = "") -> str:
+    """Save the entry as ready to publish; return the file written. Writes nothing to the site."""
+    os.makedirs(READY_DIR, exist_ok=True)
+    key = proto.get("sub_id") or proto.get("record_id") or proto.get("doi") or "entry"
+    key = re.sub(r"[^A-Za-z0-9._-]+", "_", str(key))
+    path = os.path.join(READY_DIR, f"{key}.json")
+    record = {"held_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "reason": reason, "proto": proto}
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, path)
+    print(f"  publications: HELD for the curator's approval (nothing published) -> {path}")
+    return path
+
+
+class PublishHeld(Exception):
+    """Raised by callers that must stop because publishing was not approved."""
+
+    def __init__(self, ready_path: str):
+        self.ready_path = ready_path
+        super().__init__(f"held for the curator's approval: {ready_path}")
+
+
+def upsert_entry(proto: dict, *, approved: bool = False) -> dict:
     """Insert or update a publications entry. Returns the final entry.
 
     `proto` must carry: title, authors (list[str]), doi, source. Optional:
@@ -125,6 +165,9 @@ def upsert_entry(proto: dict) -> dict:
     Returns an empty dict when ICSAC_WEBSITE_REPO is not configured (the
     Zenodo accept itself still proceeds; the registry publish is skipped).
     """
+    if not publish_approved(approved):
+        hold_for_approval(proto, "registry entry")
+        return {}
     if not WEBSITE_REPO:
         print("  Registry publish skipped: ICSAC_WEBSITE_REPO not configured")
         return {}
@@ -201,6 +244,8 @@ def stage_public_review_for_slug(
     review_key: str,
     slug: str,
     reviews_dir: str,
+    *,
+    approved: bool = False,
 ) -> tuple[Optional[str], Optional[str]]:
     """Redact the panel review + RQC keyed by `review_key`, then rename
     the generated public-reviews/<key>.{md,html} files to <slug>.{md,html}
@@ -216,6 +261,9 @@ def stage_public_review_for_slug(
 
     Returns (None, None) when ICSAC_WEBSITE_REPO is not configured.
     """
+    if not publish_approved(approved):
+        print(f"  publications: public review for {slug} HELD for the curator's approval")
+        return (None, None)
     if not WEBSITE_REPO:
         print("  Public-review stage skipped: ICSAC_WEBSITE_REPO not configured")
         return (None, None)
@@ -254,14 +302,19 @@ def stage_public_review_for_slug(
     return final_review, final_rqc
 
 
-def commit_and_push(message: str, extra_paths: Optional[list[str]] = None) -> None:
+def commit_and_push(message: str, extra_paths: Optional[list[str]] = None,
+                    *, approved: bool = False) -> None:
     """Stage accepted.json (+ any extras), commit, pull --rebase, push.
 
     No-op when the working tree is clean. Best-effort `git pull --rebase`;
     push failures raise so callers can surface a /pain signal.
 
-    No-op when ICSAC_WEBSITE_REPO is not configured.
+    No-op when ICSAC_WEBSITE_REPO is not configured, and when the caller
+    carries no approval (the publish gate above).
     """
+    if not publish_approved(approved):
+        print(f"  publications: push HELD for the curator's approval ({message[:80]})")
+        return
     if not WEBSITE_REPO:
         return
     def run(*cmd, check=True):

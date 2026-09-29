@@ -197,7 +197,8 @@ def main(argv: list[str]) -> int:
             publications_url_str = worker._register_doi_accept(sub_id, sub_dir, submission)
             _audit({"sub_id": sub_id, "event": "publications_registered",
                     "publications_url": publications_url_str, "by": "curator"}, test_mode=test_mode)
-            print(f"  publications: registered at {publications_url_str}",
+            print(f"  publications: registered at {publications_url_str}" if publications_url_str
+                  else "  publications: HELD for the curator's approval (nothing published)",
                   file=sys.stderr)
         except Exception as exc:
             print(f"  publications register failed for {sub_id}: {exc}",

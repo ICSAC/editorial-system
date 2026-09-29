@@ -981,7 +981,8 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     pre = preprint_doi(submission)
     if pre:
         proto["preprint_doi"] = pre   # the paper page links the preprint it was submitted from
-    entry = publications.upsert_entry(proto)
+    # register --live runs only after the curator typed the confirmation: approved.
+    entry = publications.upsert_entry(proto, approved=True)
     if not entry:
         log("  crossref: publications registry not configured; landing page NOT pushed")
         return {}
@@ -994,7 +995,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
             shutil.copyfile(pdf_src, dest)
             extra.append(str(dest))
     review_md, rqc_md = publications.stage_public_review_for_slug(
-        sub_id, entry["slug"], config.REVIEWS_DIR)   # (review_key, slug, dir) -- same call as publish_watcher
+        sub_id, entry["slug"], config.REVIEWS_DIR, approved=True)   # (review_key, slug, dir) -- same call as publish_watcher
     # The public review record travels in the same commit as the registry entry;
     # it was written to disk but never added (audit 2026-09-28 item 9).
     extra.extend(p for p in (review_md, rqc_md) if p)
@@ -1024,7 +1025,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
                 extra.append(stats_path)
     except Exception as exc:   # the stats page must never block a registration
         log(f"  crossref: stats snapshot not refreshed ({exc})")
-    publications.commit_and_push(message=f"publications: {entry['title']} ({entry['slug']}) — {doi}",
+    publications.commit_and_push(approved=True, message=f"publications: {entry['title']} ({entry['slug']}) — {doi}",
                                  extra_paths=extra or None)
     state_p = sub_dir / "state.json"
     state = json.loads(state_p.read_text()) if state_p.exists() else {}

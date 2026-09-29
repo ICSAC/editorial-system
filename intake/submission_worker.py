@@ -763,6 +763,9 @@ def _register_doi_accept(sub_id: str, sub_dir: Path,
         proto["code_data_url"] = cdu
 
     entry = publications.upsert_entry(proto)
+    if not entry:
+        # Held for the curator's approval (the publish gate, 2026-09-29): nothing published.
+        return None
     slug = entry["slug"]
 
     review_md, rqc_md = publications.stage_public_review_for_slug(

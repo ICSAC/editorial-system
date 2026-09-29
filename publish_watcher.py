@@ -187,6 +187,10 @@ def _register_published(sub_dir: Path, submission: dict, deposit: dict) -> dict:
         proto["code_data_url"] = cdu
 
     entry = publications.upsert_entry(proto)
+    if not entry:
+        # The publish gate held it (or no registry is configured): stop before
+        # any review is staged or any author is told it is live.
+        raise publications.PublishHeld(publications.hold_for_approval(proto, f"Zenodo publish of {sub_id}"))
     slug = entry["slug"]
 
     review_md, rqc_md = publications.stage_public_review_for_slug(
@@ -294,6 +298,24 @@ def poll_drafts() -> dict:
 
         try:
             entry = _register_published(sub_dir, submission, deposit)
+        except publications.PublishHeld as held:
+            # Drafted and ready, not published: tell the curator once, then stay quiet.
+            summary.setdefault("held", 0)
+            summary["held"] += 1
+            if not state.get("publish_held_at"):
+                state["publish_held_at"] = _now_iso()
+                state_path.write_text(json.dumps(state, indent=2))
+                msg = (f"READY TO PUBLISH (held for your approval): {sub_id} is live on Zenodo "
+                       f"(DOI {deposit_doi or 'unknown'}); its /publications entry is saved at "
+                       f"{held.ready_path}. Nothing was published and the author was not told. "
+                       f"To publish it: ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO=~/Desktop/icsac/icsacinstitute.org "
+                       f"python3 publish_watcher.py")
+                try:
+                    import notify
+                    notify.send_to_curator(msg, parse_mode=None)
+                except Exception as exc2:
+                    print(f"  publish_watcher: curator ping failed: {exc2}", file=sys.stderr)
+            continue
         except Exception as exc:
             print(f"  publish_watcher: register failed for {sub_id}: {exc}",
                   file=sys.stderr)
