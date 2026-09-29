@@ -8,10 +8,7 @@ The ICSAC reviewer panel has completed its evaluation of your submission.
 **Title:** {{title}}
 **Decision:** Recommend for publication
 
-Two PDFs are attached:
-
-- icsac-review-{{icsac_submission_id}}.pdf — full panel report
-- icsac-rqc-{{icsac_submission_id}}.pdf — Review Quality Control audit
+{{attachments_block}}
 
 ## Next steps
 

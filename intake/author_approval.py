@@ -100,7 +100,9 @@ def _update_state(sub_dir: Path, **fields) -> dict:
     p = Path(sub_dir) / "state.json"
     data = _state(sub_dir)
     data.update(fields)
-    p.write_text(json.dumps(data, indent=2))
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2))
+    os.replace(tmp, p)
     return data
 
 

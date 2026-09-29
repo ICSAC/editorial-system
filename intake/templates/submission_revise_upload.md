@@ -8,10 +8,7 @@ The ICSAC reviewer panel has completed its evaluation of your submission.
 **Title:** {{title}}
 **Decision:** Revise and resubmit
 
-Two PDFs are attached:
-
-- icsac-review-{{icsac_submission_id}}.pdf — full panel report
-- icsac-rqc-{{icsac_submission_id}}.pdf — Review Quality Control audit
+{{attachments_block}}
 
 The panel found the work substantive but identified specific issues that need to be addressed before the institute can issue a recommendation. Pay particular attention to the per-dimension scores and the concerns enumerated under each reviewer slot in the attached report.
 
