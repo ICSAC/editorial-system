@@ -276,22 +276,104 @@ def arxiv_ref_to_id(s: str) -> str:
     raise ValueError(f"not an arXiv reference: {s!r}")
 
 
-def fetch_arxiv_metadata(arxiv_id: str) -> dict:
-    """Fetch arXiv metadata via the Atom API. Returns a dict shaped like
-    extract_review_data() output so review.review_paper can use it without
-    branching on source.
+_CC_LICENSES = {
+    "creativecommons.org/licenses/by/4.0": "cc-by-4.0",
+    "creativecommons.org/licenses/by-sa/4.0": "cc-by-sa-4.0",
+    "creativecommons.org/licenses/by-nc-sa/4.0": "cc-by-nc-sa-4.0",
+    "creativecommons.org/licenses/by-nc-nd/4.0": "cc-by-nc-nd-4.0",
+    "creativecommons.org/publicdomain/zero/1.0": "cc0-1.0",
+    "arxiv.org/licenses/nonexclusive-distrib/1.0": "arxiv-nonexclusive-1.0",
+}
 
-    arXiv exposes no machine-readable license metadata (the per-deposit
-    license is on the abstract page but not in the API). We leave the
-    license slot empty; intake_server records the form-supplied license
-    if any, otherwise the panel sees an empty license id.
+
+_SPDX_LICENSES = {"cc-by-4.0", "cc-by-sa-4.0", "cc-by-nc-sa-4.0", "cc-by-nc-nd-4.0", "cc0-1.0"}
+
+
+def _license_id_from_uri(uri: str) -> str:
+    """A licence id for a rights URI. arXiv writes CC links with a /legalcode
+    suffix (seen 2026-09-29); /deed.<lang> pages are stripped the same way."""
+    u = re.sub(r"^https?://(www\.)?", "", (uri or "").strip().lower()).rstrip("/")
+    u = re.sub(r"/(legalcode|deed)(\.[a-z-]+)?$", "", u)
+    return _CC_LICENSES.get(u, "")
+
+
+def _license_id(right: dict) -> str:
+    """DataCite's SPDX rightsIdentifier when it is one we know, else the URI."""
+    spdx = (right.get("rightsIdentifier") or "").strip().lower()
+    if spdx in _SPDX_LICENSES:
+        return spdx
+    return _license_id_from_uri(right.get("rightsUri") or "")
+
+
+def _arxiv_from_datacite(arxiv_id: str) -> dict | None:
+    """arXiv registers every e-print with DataCite (10.48550/arXiv.<id>): title,
+    authors, abstract, dates, subjects, the licence, and the journal DOI once
+    published. Read from there, arXiv's own API is not touched. None when
+    DataCite has no record."""
+    url = f"https://api.datacite.org/dois/10.48550/arXiv.{urllib.parse.quote(arxiv_id)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "ICSAC-pipeline/1.0 (mailto:help@icsacinstitute.org)",
+                                               "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            a = json.load(resp)["data"]["attributes"]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    title = ((a.get("titles") or [{}])[0].get("title") or "").strip()
+    if not title:
+        return None
+    creators = []
+    for c in a.get("creators") or []:
+        given, family = (c.get("givenName") or "").strip(), (c.get("familyName") or "").strip()
+        name = f"{given} {family}".strip() if (given and family) else (c.get("name") or "").strip()
+        if name:
+            creators.append(name)
+    abstract = next((d.get("description") or "" for d in a.get("descriptions") or []
+                     if d.get("descriptionType") == "Abstract"), "")
+    subjects = [s.get("subject") or "" for s in a.get("subjects") or []]
+    m = re.search(r"\(([^()]+)\)\s*$", subjects[0]) if subjects else None
+    keywords = [m.group(1)] if m else ([subjects[0]] if subjects else [])
+    submitted = next((d.get("date") or "" for d in a.get("dates") or [] if d.get("dateType") == "Submitted"), "")
+    lic = next((lid for lid in (_license_id(r) for r in a.get("rightsList") or []) if lid), "")
+    related = [{"identifier": r.get("relatedIdentifier"), "relation": r.get("relationType")}
+               for r in a.get("relatedIdentifiers") or [] if r.get("relatedIdentifier")]
+    return {
+        "record_id": arxiv_id,
+        "doi": f"10.48550/arXiv.{arxiv_id}",
+        "title": re.sub(r"\s+", " ", title),
+        "creators": creators,
+        "description": abstract.strip(),
+        "keywords": keywords,
+        "publication_date": submitted[:10] or str(a.get("publicationYear") or ""),
+        "resource_type": {"type": "publication", "subtype": "preprint"},
+        "license": {"id": lic},
+        "related_identifiers": related,
+        "version": "1",
+        "metadata_source": "datacite",
+    }
+
+
+def fetch_arxiv_metadata(arxiv_id: str) -> dict:
+    """arXiv metadata, shaped like extract_review_data() output so
+    review.review_paper can use it without branching on source.
+
+    DataCite first (2026-09-29): it carries everything the pipeline reads plus
+    the licence, and it is not arXiv's rate-limited API. arXiv's Atom API is
+    the fallback, and it goes through arxiv_gate (arXiv's limit: one request
+    every three seconds, one connection, for all our machines together).
     """
-    url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "ICSAC-pipeline/1.0"}
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        atom = resp.read().decode("utf-8", errors="replace")
+    try:
+        meta = _arxiv_from_datacite(arxiv_id)
+        if meta:
+            return meta
+    except Exception as exc:
+        import sys as _sys
+        print(f"  arXiv metadata: DataCite lookup failed for {arxiv_id} ({type(exc).__name__}: {exc}); "
+              f"trying arXiv's API", file=_sys.stderr)
+    import arxiv_gate
+    url = f"https://export.arxiv.org/api/query?id_list={urllib.parse.quote(arxiv_id)}"
+    atom = arxiv_gate.get(url, timeout=30, attempts=3).decode("utf-8", errors="replace")
 
     ns = {
         "atom": "http://www.w3.org/2005/Atom",
