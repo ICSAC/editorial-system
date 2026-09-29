@@ -126,15 +126,18 @@ field() {
 } > "$BODY_TMP"
 
 TS=$(date +%s)
-SIG=$(printf "%s." "$TS" | cat - "$BODY_TMP" | openssl dgst -sha256 -hmac "$INTAKE_HMAC_SECRET" -hex | awk '{print $NF}')
+AUTH_NAME="Smoke%20T${TIER}%20User"
+# Signature v2: the timestamp, the three identity headers and the body.
+SIG=$(printf "icsac-v2\n%s\n%s\n%s\n%s\n" "$TS" "$LIVE_ORCID" "$AUTH_NAME" "$TIER_HEADER" \
+  | cat - "$BODY_TMP" | openssl dgst -sha256 -hmac "$INTAKE_HMAC_SECRET" -hex | awk '{print $NF}')
 
 echo "[t${TIER}] POSTing tier-${TIER} submission with X-ICSAC-Test-Tier: ${TIER_HEADER}"
 RESP=$(curl -sS -X POST "$INTAKE_URL" \
   -H "Content-Type: multipart/form-data; boundary=$BOUNDARY" \
   -H "x-icsac-timestamp: $TS" \
-  -H "x-icsac-signature: sha256=$SIG" \
+  -H "x-icsac-signature: v2=$SIG" \
   -H "x-icsac-auth-orcid: $LIVE_ORCID" \
-  -H "x-icsac-auth-name: Smoke%20T${TIER}%20User" \
+  -H "x-icsac-auth-name: $AUTH_NAME" \
   -H "x-icsac-test-tier: ${TIER_HEADER}" \
   --data-binary "@$BODY_TMP")
 echo "[t${TIER}] response: $RESP"
