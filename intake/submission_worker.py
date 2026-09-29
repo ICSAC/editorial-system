@@ -198,12 +198,16 @@ def _resolve_pending_doi(sub_id: str, sub_dir: Path,
     pdf_size = paper_path.stat().st_size
     pdf_sha = hashlib.sha256(paper_path.read_bytes()).hexdigest()
 
+    # The author's choice for the published article wins (2026-09-29); the
+    # preprint's own licence is kept beside it for the curation team.
+    chosen = (submission.get("article_license") or "").strip().lower()
     submission.update({
         "pending_pdf_fetch": False,
         "title": review_meta.get("title") or "Untitled",
         "abstract": review_meta.get("description") or "",
         "keywords": keywords,
-        "license": license_id,
+        "license": chosen or license_id,
+        "preprint_license": license_id,
         "creators": creators,
         "publication_date": review_meta.get("publication_date")
             or submission.get("publication_date") or "",

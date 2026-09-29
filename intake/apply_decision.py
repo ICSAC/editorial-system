@@ -290,9 +290,14 @@ def main(argv: list[str]) -> int:
                     lines.append(f"  check the preprint: {flag}")
             elif source == "doi":
                 lines.append("Preprint: NOT RESOLVED -- check the relation before --live")
-            if source == "doi" and not (submission.get("license") or "").lower().startswith("cc"):
-                lines.append(f"Licence on the preprint: {submission.get('license') or 'none recorded'} "
-                             f"-- check it before --live (the site hosts the PDF)")
+            if source == "doi":
+                art_lic = (submission.get("license") or "").lower()
+                if submission.get("article_license"):
+                    lines.append(f"Article licence: {art_lic} (the author's choice); the preprint's: "
+                                 f"{submission.get('preprint_license') or 'not reported by the server'}")
+                elif not art_lic.startswith("cc"):
+                    lines.append(f"Licence on the preprint: {art_lic or 'none recorded'} "
+                                 f"-- check it before --live (the site hosts the PDF)")
             if source == "upload":   # a DOI-route preprint is archived where it is
                 if state_pre.get("deposit_draft_url"):
                     lines.append(f"Zenodo archive DRAFT (unpublished): {state_pre['deposit_draft_url']}")
