@@ -65,7 +65,8 @@ try:
     x = xml.decode()
     check('relationship-type="hasPreprint"' in x and ">10.5281/zenodo.123456<" in x,
           "the deposit links the preprint (hasPreprint)")
-    check(x.find("<rel:program") < x.find("<doi_data"), "the relation sits before doi_data")
+    art = x[x.find("<journal_article"):]   # journal_metadata may carry the journal title DOI's own doi_data
+    check(0 < art.find("<rel:program") < art.find("<doi_data"), "the relation sits before the article's doi_data")
     up = cd.build_deposit_xml(dict(base, source="upload"), doi="10.67697/icsac.2026.098",
                               landing_url="https://icsacinstitute.org/publications/x", pdf_url=None,
                               content_type="journal-article")
