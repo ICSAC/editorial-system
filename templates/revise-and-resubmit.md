@@ -26,7 +26,7 @@ If a particular point of feedback is one you disagree with, you are welcome to a
 
 ## About the review process
 
-This review was produced through ICSAC's open review process — a multi-reviewer panel with AI tooling helping draft and structure each review. Final decisions rest with human curators. The review criteria — domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal — are published openly at [icsacinstitute.org](https://icsacinstitute.org).
+This review was produced through ICSAC's open review process — a multi-reviewer panel with AI tooling helping draft and structure each review. Final decisions rest with the curation team. The review criteria — domain fit, methodological transparency, internal consistency, citation integrity, novelty, and AI Provenance Signal — are published openly at [icsacinstitute.org](https://icsacinstitute.org).
 
 If you believe this review contains errors or mischaracterizes your work, contact info@icsacinstitute.org with specific objections and we will re-evaluate.
 

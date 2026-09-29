@@ -384,7 +384,7 @@ def build_public_markdown(parsed: ParsedReview) -> str:
             (
                 "*Reviews at ICSAC are open and transparent. AI tooling helps "
                 "the panel draft and structure each review; final acceptance "
-                "decisions rest with human curators. Reviews are published "
+                "decisions rest with the curation team. Reviews are published "
                 "alongside acceptance for accountability; individual reviewer "
                 "identities are abstracted to keep focus on the assessment "
                 "rather than the tooling behind it.*"
@@ -790,7 +790,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         lines.extend([
             (
                 "The audit surfaced a concern outside the four scholarly "
-                "dimensions above. Human curators reviewed the panel output "
+                "dimensions above. The curation team reviewed the panel output "
                 "before the acceptance decision was recorded."
             ),
             "",

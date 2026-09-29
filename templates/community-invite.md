@@ -6,9 +6,9 @@ Subject: An invitation — Contribute to the ICSAC review community
 
 Dear {{greeting}},
 
-You just saw the ICSAC review pipeline from the author side. Five independent AI models scored your paper against a public rubric. A human curator signed off. That pipeline is the whole bet.
+You just saw the ICSAC review pipeline from the author side. Five independent AI models scored your paper against a public rubric. The curation team signed off. That pipeline is the whole bet.
 
-Most research done by independent researchers and small labs never gets a fair read from traditional journals. Review takes months, costs hundreds in APCs, and depends on reviewers who may not know the subfield. AI can do a transparent first pass in hours. Humans stay in the loop for judgment calls that actually need judgment. ICSAC is the experiment to prove that works at scale. We are not a journal. We are a review community with a public rubric, reviews available on request, and zero fees, ever.
+Most research done by independent researchers and small labs never gets a fair read from traditional journals. Review takes months, costs hundreds in APCs, and depends on reviewers who may not know the subfield. AI can do a transparent first pass in hours. Humans stay in the loop for judgment calls that actually need judgment. ICSAC is the experiment to prove that works at scale. We are a review community with a public rubric, a published review record, and zero fees, ever.
 
 ## Three ways to engage
 
