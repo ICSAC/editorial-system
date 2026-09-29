@@ -232,9 +232,11 @@ try:
         req = httpx.Request("POST", "http://intake/api/submit", data=data)
         body = req.read()
         ts = str(int(time.time()))
-        sig = hmac.new(iss.HMAC_SECRET, f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+        # Signature v2 (2026-09-29): ts, ORCID, name (none sent), tier, then the body.
+        sig = hmac.new(iss.HMAC_SECRET, f"icsac-v2\n{ts}\n{TEST_ORCID}\n\nt2\n".encode() + body,
+                       hashlib.sha256).hexdigest()
         r = client.post("/api/submit", content=body, headers={
-            "content-type": req.headers["content-type"], "x-icsac-signature": f"sha256={sig}",
+            "content-type": req.headers["content-type"], "x-icsac-signature": f"v2={sig}",
             "x-icsac-timestamp": ts, "x-icsac-auth-orcid": TEST_ORCID, "x-icsac-test-tier": "t2"})
         return r.status_code, r.json()
 
