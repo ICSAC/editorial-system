@@ -82,7 +82,7 @@ def _save_registry(registry: list[dict]) -> None:
 _OPTIONAL_KEYS = (
     "license_url", "keywords", "canonical_url", "ssrn_id", "ssrn_url", "ssrn_doi",
     "promotion_opt_out", "promotion_exclusions", "persistence_opt_out",
-    "code_data_url",
+    "code_data_url", "preprint_doi",
 )
 
 

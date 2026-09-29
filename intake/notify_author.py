@@ -20,6 +20,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import email_send  # noqa: E402
+import config  # noqa: E402
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 COMMUNITY_URL = "https://icsacinstitute.org/community/membership-affiliation"
@@ -216,6 +217,7 @@ def send_intake_failure(*, to: str, sub_id: str, author_name: str,
 def send_published(*, to: str, sub_id: str, title: str, author_name: str,
                    deposit_doi: str, deposit_url: str,
                    publications_url: str, curator_note: str = "",
+                   preprint_doi: str = "",
                    license_name: str = "", stay_involved: bool = True,
                    tier: int = 1) -> tuple[bool, str]:
     """Send the post-publish notification email for a PDF-route accept.
@@ -237,6 +239,9 @@ def send_published(*, to: str, sub_id: str, title: str, author_name: str,
         "title": title, "author_name": author_name,
         "deposit_doi": deposit_doi,
         "deposit_url": deposit_url,
+        # A DOI-route paper's other copy is its preprint, not an ICSAC archive.
+        "archive_line": (f"**Preprint:** [https://doi.org/{preprint_doi}](https://doi.org/{preprint_doi})"
+                         if preprint_doi else f"**Archived copy:** [{deposit_url}]({deposit_url})"),
         "publications_url": publications_url,
         "license_name": license_name or "the open licence you selected",
         "stay_involved": _fragment("_stay_involved.md") if stay_involved else "",
@@ -304,6 +309,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   terms_version: str = "", approval_url: str = "",
                   objection_deadline: str = "",
                   code_link_claims: list[str] | None = None,
+                  preprint_doi: str = "",
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -328,7 +334,11 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
     # + deposit_url) when the deposit step has succeeded; falls back to the
     # _pending variant — the previous interim copy — when deposit_doi is
     # empty (deposit failed or hasn't run yet for some reason).
-    if (verdict, source) == ("accept", "upload") and not deposit_doi:
+    # Under Crossref a DOI-route accept is a Persistence article too (policy
+    # 2026-09-28): same acceptance email, with the preprint line.
+    doi_route_article = (source == "doi"
+                         and getattr(config, "DOI_REGISTRAR", "crossref") == "crossref")
+    if verdict == "accept" and ((source == "upload" and not deposit_doi) or doi_route_article):
         template: Optional[str] = "submission_accept_upload_pending.md"
     else:
         template = {
@@ -425,6 +435,12 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "terms_version": terms_version or "current",
         "approval_url": approval_url or "https://icsacinstitute.org/contact",
         "objection_deadline": objection_deadline or "the date in our follow-up",
+        "prior_doi_line": (
+            f"Your preprint keeps its own DOI ({preprint_doi}) and stays where it is. The *Persistence* "
+            f"DOI is the published version, and the two are linked in their DOI records."
+            if preprint_doi else
+            "We take it that this paper has no other DOI and is not under review elsewhere, "
+            "as confirmed at submission."),
         "review_pdf_name": f"icsac-review-{sub_id}.pdf",
         "rqc_pdf_name": f"icsac-rqc-{sub_id}.pdf",
         "code_claims": "\n\n".join(f'> "{c}"' for c in (code_link_claims or [])) or (
