@@ -45,6 +45,7 @@ if str(_REPO_ROOT) not in sys.path:
 import config  # noqa: E402
 
 import submission_intake as ingest  # noqa: E402  — pipeline module
+import preprint_check  # noqa: E402
 import notify  # noqa: E402
 
 from . import notify_author  # local
@@ -745,6 +746,7 @@ async def handle_test_pipeline_submission(
 
     if has_doi:
         _validate_doi_shape(doi)
+    preprint = None if has_doi else await _preprint_from_form(form)
 
     sub_id = _allocate_test_sub_id()
     token = _test_token(tier, seed=sub_id)
@@ -877,6 +879,8 @@ async def handle_test_pipeline_submission(
         "funding": funding,
         "related_identifiers": related_identifiers,
         "code_data": code_data or {"available": None, "url": None},
+        "preprint_doi": preprint["doi"] if preprint else None,
+        "preprint_meta": preprint,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
@@ -952,6 +956,31 @@ def healthz():
     return {"ok": True, "ts": _now_iso()}
 
 
+async def _preprint_from_form(form) -> dict | None:
+    """The upload route's optional preprint DOI, from any preprint server
+    (policy 2026-09-28). The preprint keeps its DOI; the Persistence article gets
+    its own, linked to it. Refused (422) when it is not a DOI, does not exist, or
+    is a published work; a registry that cannot be reached fails open (the
+    record says unverified and the curation team checks by hand)."""
+    raw = form.get("preprint_doi")
+    raw = raw.strip() if isinstance(raw, str) else ""
+    if not raw:
+        return None
+    doi = preprint_check.normalize(raw)
+    if not doi:
+        raise HTTPException(422, {
+            "error": "preprint_doi_invalid",
+            "message": ("The preprint DOI should look like 10.xxxx/… (or an arXiv ID such as "
+                        "2401.12345). Check it, or leave the field empty."),
+        })
+    title = form.get("title")
+    try:
+        return await asyncio.to_thread(preprint_check.check, doi,
+                                       title=title if isinstance(title, str) else "")
+    except preprint_check.Refused as exc:
+        raise HTTPException(422, {"error": "preprint_doi_refused", "message": str(exc)})
+
+
 def _validate_doi_shape(doi: str) -> None:
     """Synchronous shape-only check on a DOI or arXiv reference. The actual
     resolution + PDF fetch is deferred to the worker so the handler
@@ -969,11 +998,10 @@ def _validate_doi_shape(doi: str) -> None:
         raise HTTPException(422, {
             "error": "doi_unsupported",
             "message": (
-                "DOI mode supports Zenodo (10.5281/zenodo.NNNNN) and arXiv "
-                "(10.48550/arXiv.YYMM.NNNNN, or a bare arXiv ID like "
-                "2103.12345). Other DOI sources (Crossref, DataCite, "
-                "publisher DOIs) are a known gap — for those, upload the "
-                "PDF directly using the 'Upload PDF' tab."
+                "The DOI route fetches papers from Zenodo and arXiv. For a "
+                "preprint on any other server, use the upload form: upload "
+                "the PDF and enter this DOI as your preprint DOI "
+                f"(https://icsacinstitute.org/submit/upload?preprint_doi={doi})."
             ),
         })
     raise HTTPException(422, {
@@ -1006,6 +1034,8 @@ async def api_submit(request: Request):
         "email": form.get("email"),
         "orcid": form.get("orcid", ""),
         "coi": form.get("coi", ""),
+        # Never passed before 2026-09-28, so every submission stored None.
+        "exclusivity_acknowledged": form.get("exclusivity_acknowledged"),
     })
     code_data = _parse_code_data(form.get("code_data_available"), form.get("code_data_url"))
 
@@ -1093,6 +1123,7 @@ async def api_submit(request: Request):
         # previously blew CF Pages' upstream-fetch timeout and blocked
         # the form's redirect on success).
         _validate_doi_shape(doi)
+    preprint = None if has_doi else await _preprint_from_form(form)
 
     sub_id = _allocate_sub_id()
     sub_dir = SUBMISSIONS_ROOT / sub_id
@@ -1228,6 +1259,8 @@ async def api_submit(request: Request):
         "funding": funding,
         "related_identifiers": related_identifiers,
         "code_data": code_data or {"available": None, "url": None},
+        "preprint_doi": preprint["doi"] if preprint else None,
+        "preprint_meta": preprint,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
