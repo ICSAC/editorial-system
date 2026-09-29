@@ -49,16 +49,23 @@ def _parse_frontmatter(text: str) -> dict:
     return out
 
 
+# The raw review writes "## Aggregate Scores"; the published copy writes
+# "### Aggregate scores". Reviews before 2026-05-17 name the last dimension
+# by its old label.
+_AGG_HEADING = re.compile(r"^#{2,3}\s+aggregate\s+scores\b", re.I)
+_LABEL_ALIASES = {"AI Slop Detection": "AI Provenance Signal"}
+
+
 def _parse_aggregate_means(text: str) -> dict[str, float]:
     """Pull dimension → mean from the aggregate markdown table."""
     means: dict[str, float] = {}
     in_table = False
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped.startswith("## Aggregate Scores"):
+        if _AGG_HEADING.match(stripped):
             in_table = True
             continue
-        if in_table and stripped.startswith("## "):
+        if in_table and stripped.startswith("#"):
             break
         if not in_table or not stripped.startswith("|"):
             continue
@@ -67,7 +74,7 @@ def _parse_aggregate_means(text: str) -> dict[str, float]:
             continue
         if set("".join(cells)) <= set("- "):
             continue
-        label = cells[0]
+        label = _LABEL_ALIASES.get(cells[0], cells[0])
         try:
             means[label] = float(cells[1])
         except ValueError:
@@ -144,7 +151,9 @@ def _load_reviews(reviews_dir: str) -> list[dict]:
             {
                 "record_id": rid,
                 "recommendation": fm.get("recommendation", "REVIEW_FURTHER"),
-                "disagreement": fm.get("disagreement", "False").lower() == "true",
+                # Published copies carry "consensus: divided" instead.
+                "disagreement": (fm["disagreement"].lower() == "true") if "disagreement" in fm
+                                else fm.get("consensus", "").lower() == "divided",
                 "review_date": _parse_review_date(fm.get("review_date", "")),
                 "dimension_means": means,
                 "rqc_flag": rqc_flags.get(rid),
@@ -170,8 +179,15 @@ def _histogram(values: list[float]) -> dict[str, int]:
     return bins
 
 
-def compute_stats(reviews_dir: str) -> dict:
+def compute_stats(reviews_dir: str, public_dir: str | None = None) -> dict:
+    """public_dir: the website's published review records. The raw files behind
+    the papers reviewed before the public flip (2026-05-16) are gone from
+    reviews/, so the published copies are the only record of those reviews;
+    a record in both places counts once (raw wins)."""
     reviews = _load_reviews(reviews_dir)
+    if public_dir:
+        seen = {r["record_id"] for r in reviews}
+        reviews += [r for r in _load_reviews(public_dir) if r["record_id"] not in seen]
     now = _dt.datetime.now(_dt.timezone.utc)
     cutoff = now - _dt.timedelta(days=30)
 
@@ -226,8 +242,8 @@ def compute_stats(reviews_dir: str) -> dict:
     }
 
 
-def write_stats(reviews_dir: str, out_path: str) -> str:
-    stats = compute_stats(reviews_dir)
+def write_stats(reviews_dir: str, out_path: str, public_dir: str | None = None) -> str:
+    stats = compute_stats(reviews_dir, public_dir)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
@@ -250,5 +266,10 @@ if __name__ == "__main__":
             "~/Desktop/icsac/icsacinstitute.org/src/data/stats.json"
         )
     )
-    written = write_stats(rdir, out)
+    pub = (
+        sys.argv[3]
+        if len(sys.argv) > 3
+        else os.path.join(os.path.dirname(os.path.dirname(out)), "data", "public-reviews")
+    )
+    written = write_stats(rdir, out, pub if os.path.isdir(pub) else None)
     print(f"wrote {written}")
