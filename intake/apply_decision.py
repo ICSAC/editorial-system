@@ -179,11 +179,13 @@ def main(argv: list[str]) -> int:
     deposit_doi = state_pre.get("deposit_doi")
     deposit_url = state_pre.get("deposit_url")
 
-    # DOI-route accept: register to /publications immediately (mirrors
-    # submission_worker.process()). PDF-route accept defers to
-    # publish_watcher after the curator publishes the draft.
+    registrar = getattr(config, "DOI_REGISTRAR", "crossref")
+    # Legacy (registrar="zenodo") DOI-route accept: register to /publications
+    # immediately under the author's DOI. Under Crossref the DOI route is a
+    # Persistence article like an upload (policy 2026-09-28): its own DOI,
+    # linked to the preprint, published when register-doi.sh --live runs.
     publications_url_str: str | None = None
-    if verdict == "accept" and source == "doi" and not test_mode:
+    if verdict == "accept" and source == "doi" and not test_mode and registrar != "crossref":
         try:
             publications_url_str = worker._register_doi_accept(sub_id, sub_dir, submission)
             _audit({"sub_id": sub_id, "event": "publications_registered",
@@ -206,7 +208,6 @@ def main(argv: list[str]) -> int:
     # template either way. Mirrors submission_worker.process().
     deposit_record_id = state_pre.get("deposit_record_id")
     skip_zenodo = test_mode and tier == 2
-    registrar = getattr(config, "DOI_REGISTRAR", "crossref")
 
     # 2026-09-27: ICSAC is a Crossref member. Under registrar="crossref" an
     # accept stages a DEPOSIT DRAFT on disk (<sub_dir>/crossref/deposit.xml,
@@ -216,8 +217,12 @@ def main(argv: list[str]) -> int:
     # Test tiers never stage (a draft is harmless, but the counter would burn).
     # T2 has no external side effects at all; T3 rehearses with a TEST DOI (no
     # counter burn) and a sandbox Zenodo draft, exactly like production.
-    crossref_path = (verdict == "accept" and source == "upload"
+    crossref_path = (verdict == "accept" and source in ("upload", "doi")
                      and registrar == "crossref" and not (test_mode and tier == 2))
+    preprint = None
+    if crossref_path and source == "doi":
+        import crossref_deposit as _cdp
+        preprint = _cdp.preprint_doi(submission)
     if crossref_path and not state_pre.get("crossref_doi"):
         try:
             import crossref_deposit
@@ -240,8 +245,9 @@ def main(argv: list[str]) -> int:
     # Archival copy on Zenodo as a DRAFT that carries the ICSAC DOI as an
     # external DOI (Zenodo mints nothing). register-doi.sh --live publishes it
     # only after Crossref confirms the DOI. Same deposit_consent contract.
+    # Upload route only: a DOI-route paper's preprint is already archived.
     cr_doi = state_pre.get("crossref_doi")
-    if (crossref_path and cr_doi and form.get("deposit_consent")
+    if (crossref_path and source == "upload" and cr_doi and form.get("deposit_consent")
             and not state_pre.get("deposit_record_id")):
         try:
             import repository_deposit as zenodo_deposit
@@ -278,7 +284,13 @@ def main(argv: list[str]) -> int:
                           f"Will resolve to: {state_pre.get('crossref_landing_url')}"]
             else:
                 lines.append("Crossref draft: FAILED to stage -- see audit log")
-            if state_pre.get("deposit_draft_url"):
+            if source == "doi":
+                lines.append(f"Preprint (linked as hasPreprint): "
+                             f"{('https://doi.org/' + preprint) if preprint else 'NOT RESOLVED -- check the relation before --live'}")
+                if not (submission.get("license") or "").lower().startswith("cc"):
+                    lines.append(f"Licence on the preprint: {submission.get('license') or 'none recorded'} "
+                                 f"-- check it before --live (the site hosts the PDF)")
+            elif state_pre.get("deposit_draft_url"):
                 lines.append(f"Zenodo archive DRAFT (unpublished): {state_pre['deposit_draft_url']}")
             elif form.get("deposit_consent"):
                 lines.append("Zenodo archive draft: NOT staged -- see audit log")
@@ -355,7 +367,7 @@ def main(argv: list[str]) -> int:
     # The author's personal response link + the objection window. T2 has no
     # external surface, so no window; T3 gets one (the page shows the TEST banner).
     approval_url, objection_deadline = "", ""
-    if verdict == "accept" and source == "upload" and not (test_mode and tier == 2):
+    if verdict == "accept" and (source == "upload" or crossref_path) and not (test_mode and tier == 2):
         try:
             from . import author_approval
             ap = author_approval.issue(sub_dir, force=force)
@@ -406,7 +418,7 @@ def main(argv: list[str]) -> int:
         author_display=author_display, affiliation=affiliation, license_name=license_name,
         terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
         approval_url=approval_url, objection_deadline=objection_deadline,
-        code_link_claims=code_link_claims,
+        code_link_claims=code_link_claims, preprint_doi=preprint or "",
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
@@ -454,7 +466,9 @@ def main(argv: list[str]) -> int:
     # resolver via rehydrate.sh; sha256 in the stub guards verification.
     # Upload submissions are skipped by stub_pdf_if_doi (they're the
     # archive of record).
-    if worker.stub_pdf_if_doi(sub_dir, submission):
+    # A DOI-route Persistence article keeps its PDF: the site hosts the
+    # version of record at registration.
+    if not crossref_path and worker.stub_pdf_if_doi(sub_dir, submission):
         _audit({"sub_id": sub_id, "event": "pdf_stubbed",
                 "doi": submission.get("doi", ""), "by": "curator"}, test_mode=test_mode)
 

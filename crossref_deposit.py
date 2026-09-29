@@ -54,8 +54,9 @@ CR_NS = "http://www.crossref.org/schema/5.4.0"
 XSI_NS = "http://www.w3.org/2001/XMLSchema-instance"
 JATS_NS = "http://www.ncbi.nlm.nih.gov/JATS1"
 AI_NS = "http://www.crossref.org/AccessIndicators.xsd"
+REL_NS = "http://www.crossref.org/relations.xsd"
 SCHEMA_LOCATION = f"{CR_NS} https://www.crossref.org/schemas/crossref5.4.0.xsd"
-for _p, _u in (("", CR_NS), ("xsi", XSI_NS), ("jats", JATS_NS), ("ai", AI_NS)):
+for _p, _u in (("", CR_NS), ("xsi", XSI_NS), ("jats", JATS_NS), ("ai", AI_NS), ("rel", REL_NS)):
     ET.register_namespace(_p, _u)
 
 DEPOSIT_URL_LIVE = "https://doi.crossref.org/servlet/deposit"
@@ -311,6 +312,39 @@ def _license(parent: ET.Element, license_id: str) -> None:
     ref.text = url
 
 
+_ARXIV_ID = re.compile(r"^(?:arxiv:)?(?:10\.48550/arxiv\.)?(\d{4}\.\d{4,5})(?:v\d+)?$", re.I)
+
+
+def preprint_doi(submission: dict) -> Optional[str]:
+    """The DOI of the preprint a DOI-route paper was submitted from (a Zenodo
+    DOI, or arXiv's 10.48550 DOI for an arXiv id), else None. The Persistence
+    article gets its own DOI and points back to it: Crossref's versioning
+    practice gives a preprint and its published version separate DOIs, linked
+    by a relation (policy 2026-09-28; the five founding papers keep their
+    Zenodo DOIs, as stated to Crossref on 2026-07-06)."""
+    if submission.get("source") != "doi":
+        return None
+    ref = (submission.get("doi") or submission.get("source_ref") or "").strip()
+    ref = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)", "", ref, flags=re.I)
+    m = _ARXIV_ID.match(ref)
+    if m:
+        return f"10.48550/arXiv.{m.group(1)}"
+    return ref if re.match(r"^10\.\d{4,9}/\S+$", ref) else None
+
+
+def _relations(parent: ET.Element, submission: dict) -> None:
+    """rel:program with hasPreprint -> the preprint's DOI (schema order: after
+    the licence program, before doi_data)."""
+    pre = preprint_doi(submission)
+    if not pre:
+        return
+    prog = ET.SubElement(parent, _q("program", REL_NS))
+    item = ET.SubElement(prog, _q("related_item", REL_NS))
+    rel = ET.SubElement(item, _q("intra_work_relation", REL_NS),
+                        {"relationship-type": "hasPreprint", "identifier-type": "doi"})
+    rel.text = pre
+
+
 def _doi_data(parent: ET.Element, doi: str, landing: str, pdf_url: Optional[str]) -> None:
     dd = _sub(parent, "doi_data")
     _sub(dd, "doi", doi)
@@ -385,6 +419,7 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
         if place:
             _sub(pub, "publisher_place", place)
         _license(md, submission.get("license", ""))
+        _relations(md, submission)
         _doi_data(md, doi, landing_url, pdf_url)
         _citations(md, citations or [])
     elif content_type == "journal-article":
@@ -429,6 +464,7 @@ def build_deposit_xml(submission: dict, *, doi: str, landing_url: str,
             pi = _sub(ja, "publisher_item")
             _sub(pi, "item_number", seq_txt, attrib={"item_number_type": "article_number"})
         _license(ja, submission.get("license", ""))
+        _relations(ja, submission)
         _doi_data(ja, doi, landing_url, pdf_url)
         _citations(ja, citations or [])
     elif content_type == "posted_content":
@@ -883,6 +919,9 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     cdu = publications.code_data_url(submission)
     if cdu:
         proto["code_data_url"] = cdu
+    pre = preprint_doi(submission)
+    if pre:
+        proto["preprint_doi"] = pre   # the paper page links the preprint it was submitted from
     entry = publications.upsert_entry(proto)
     if not entry:
         log("  crossref: publications registry not configured; landing page NOT pushed")
@@ -963,6 +1002,7 @@ def _notify_author(sub_dir: Path, submission: dict, doi: str, slug: Optional[str
             to=form["email"], sub_id=sub_dir.name, title=submission.get("title") or "",
             author_name=form.get("name", ""), deposit_doi=doi,
             deposit_url=archive_url or landing,
+            preprint_doi=preprint_doi(submission) or "",
             publications_url=landing,
             license_name=LICENSE_LABELS.get((submission.get("license") or "").lower(), ""),
             stay_involved=stay, tier=tier)

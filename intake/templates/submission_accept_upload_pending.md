@@ -37,7 +37,7 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 - The paper is published in *Persistence* online under that licence, and appears under the same licence in the annual print and ebook edition if included. The edition is sold as a paperback and ebook; authors pay nothing and are paid nothing, and there are no free, discounted, draft, or author copies. Credential holders will receive a member discount on copies.
 - We may, but do not promise to, announce and promote your paper on the institute's website, social media, newsletters, and print or broadcast materials, at no cost to you. You can exclude any of these, or the annual print and ebook edition of *Persistence*, on your response page.
 - You will be listed as **{{author_display}}**{{affiliation_line}}.
-- We take it that this paper has no other DOI and is not under review elsewhere, as confirmed at submission.
+- {{prior_doi_line}}
 
 ## About this review
 
