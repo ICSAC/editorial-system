@@ -77,11 +77,19 @@ try:
     gap = "Complete source code and validated data files are available in the GitHub Repository."
     check(len(ca.find_claims(gap)) == 1, "words between 'code' and 'are available' still read as a claim")
     for p in sorted(glob.glob(str(PAPERS / "*.pdf"))):
-        if p.endswith("-icsac.pdf"):
-            continue
+        if p.endswith("-icsac.pdf") or not Path(p).stem.isdigit():
+            continue   # founding papers are the Zenodo-record PDFs; intake papers below
         rr = ca.assess({}, ingest.extract_pdf_text(p))
         check(not rr["missing_link"], f"founding paper {Path(p).stem}: not held "
               f"({len(rr['claims'])} claim(s), {len(rr['links']['in_paper'])} link(s))")
+    # The first intake paper (2026-09-29): its Declarations promise an archive with no
+    # link in the text; the link came from the author's reply and rides on code_data.
+    vim = PAPERS / "ICSAC-SUB-00008.pdf"
+    if vim.exists():
+        vt = ingest.extract_pdf_text(str(vim))
+        check(ca.assess({}, vt)["missing_link"], "the published paper on its text alone: held (the claim has no link)")
+        check(not ca.assess({"code_data": {"available": True, "url": "https://doi.org/10.5281/zenodo.23042786"}}, vt)["missing_link"],
+              "the published paper with its author's archive link: not held")
 
     # ── 2. the form answer through the real handler ──────────────────────────
     print("2. /api/submit (T2, signed like the proxy)")

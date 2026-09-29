@@ -851,6 +851,14 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
         # 3. landing page
         if not ck.get("publications_pushed_at"):
             entry = _push_publications(sub_dir, submission, doi, log=log)
+            if not entry:
+                # A skipped page was once recorded as pushed (first --live, 2026-09-29):
+                # the DOI resolved to a 404 and a re-run would not have retried. Stop here
+                # instead; the Crossref checkpoint holds, so a re-run resumes at this step.
+                raise CrossrefError(
+                    "the publications registry is not configured (ICSAC_WEBSITE_REPO), so the "
+                    f"landing page was NOT pushed and https://doi.org/{doi} resolves to a 404; "
+                    "set it and re-run register-doi.sh --live to resume from this step")
             ck["publications_pushed_at"] = _now_iso()
             ck["publications_slug"] = entry.get("slug") if entry else None
             _save_staged()
