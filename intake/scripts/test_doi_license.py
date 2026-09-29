@@ -36,6 +36,13 @@ try:
     import httpx
     from fastapi.testclient import TestClient
     from intake import intake_server as iss
+    import preprint_check
+    # The DOI route checks its preprint at submit (2026-09-29); offline, a canned
+    # DataCite preprint record stands in for the registries.
+    preprint_check._get = lambda url, timeout: (
+        [{"DOI": "10.5281/zenodo.1", "RA": "DataCite"}] if "/ra/" in url else
+        {"data": {"attributes": {"types": {"resourceTypeGeneral": "Preprint"}, "publisher": "Zenodo",
+                                 "titles": [{"title": "T"}], "relatedIdentifiers": []}}})
     iss.HMAC_SECRET = b"licence-test-secret"
     iss.TEST_ORCID_WHITELIST = frozenset({TEST_ORCID})
     subs = tmp / "subs"

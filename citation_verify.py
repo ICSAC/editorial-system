@@ -297,11 +297,14 @@ def _search_arxiv(query_terms: list[str], year: int | None = None) -> dict | Non
         url, headers={"User-Agent": CITATION_USER_AGENT}
     ) if False else None  # placeholder to keep static analyzers quiet
     import urllib.request as _ur, urllib.error as _ue
-    req = _ur.Request(url, headers={"User-Agent": CITATION_USER_AGENT})
+    # Through the one door to arXiv's API: one connection, one request every
+    # three seconds for all our machines, and a cool-off after a refusal (the
+    # verifier runs eight citations at a time; this step waits its turn or
+    # is skipped). A skipped search is a miss; the other resolvers still run.
+    import arxiv_gate
     try:
-        with _ur.urlopen(req, timeout=15) as resp:
-            atom = resp.read().decode("utf-8", errors="replace")
-    except (_ue.HTTPError, _ue.URLError, TimeoutError):
+        atom = arxiv_gate.get(url, timeout=15, attempts=1).decode("utf-8", errors="replace")
+    except Exception:
         return None
 
     import xml.etree.ElementTree as _ET

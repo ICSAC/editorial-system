@@ -748,6 +748,7 @@ async def handle_test_pipeline_submission(
         _validate_doi_shape(doi)
     preprint = None if has_doi else await _preprint_from_form(form)
     article_license = _doi_route_license(form) if has_doi else None
+    doi_route_meta = await _doi_route_check(doi) if has_doi else None
 
     sub_id = _allocate_test_sub_id()
     token = _test_token(tier, seed=sub_id)
@@ -882,7 +883,7 @@ async def handle_test_pipeline_submission(
         "code_data": code_data or {"available": None, "url": None},
         "preprint_doi": preprint["doi"] if preprint else None,
         "article_license": article_license,
-        "preprint_meta": preprint,
+        "preprint_meta": preprint or doi_route_meta,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
@@ -995,6 +996,19 @@ async def _preprint_from_form(form) -> dict | None:
     try:
         return await asyncio.to_thread(preprint_check.check, doi,
                                        title=title if isinstance(title, str) else "")
+    except preprint_check.Refused as exc:
+        raise HTTPException(422, {"error": "preprint_doi_refused", "message": str(exc)})
+
+
+async def _doi_route_check(doi: str) -> dict | None:
+    """The DOI route's own preprint gets the upload route's check (2026-09-29):
+    a paper already published in a journal is refused at submit (arXiv records
+    the journal DOI with DataCite). Unreachable registries fail open."""
+    pre = preprint_check.normalize(doi)
+    if not pre:
+        return None
+    try:
+        return await asyncio.to_thread(preprint_check.check, pre)
     except preprint_check.Refused as exc:
         raise HTTPException(422, {"error": "preprint_doi_refused", "message": str(exc)})
 
@@ -1143,6 +1157,7 @@ async def api_submit(request: Request):
         _validate_doi_shape(doi)
     preprint = None if has_doi else await _preprint_from_form(form)
     article_license = _doi_route_license(form) if has_doi else None
+    doi_route_meta = await _doi_route_check(doi) if has_doi else None
 
     sub_id = _allocate_sub_id()
     sub_dir = SUBMISSIONS_ROOT / sub_id
@@ -1280,7 +1295,7 @@ async def api_submit(request: Request):
         "code_data": code_data or {"available": None, "url": None},
         "preprint_doi": preprint["doi"] if preprint else None,
         "article_license": article_license,
-        "preprint_meta": preprint,
+        "preprint_meta": preprint or doi_route_meta,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,

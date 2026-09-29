@@ -122,6 +122,30 @@ def check(doi: str, *, title: str = "", timeout: float = 10.0) -> dict:
             out["title"] = ((a.get("titles") or [{}])[0]).get("title")
             if rtg != "Preprint":
                 out["flags"].append(f"DataCite type {rtg}, not marked as a preprint")
+            # A published version, as arXiv records it (IsVersionOf the journal DOI).
+            # The record's own prefix is skipped: Zenodo versions point at their
+            # concept DOI that way.
+            own = doi.split("/", 1)[0].lower()
+            for rel in a.get("relatedIdentifiers") or []:
+                if rel.get("relationType") not in ("IsVersionOf", "IsPreprintOf", "IsPublishedIn"):
+                    continue
+                if (rel.get("relatedIdentifierType") or "").upper() != "DOI":
+                    continue
+                target = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)", "",
+                                (rel.get("relatedIdentifier") or "").strip(), flags=re.I)
+                if not target or target.split("/", 1)[0].lower() == own:
+                    continue
+                try:
+                    tm = _get(f"https://api.crossref.org/works/{urllib.parse.quote(target, safe='/')}",
+                              timeout)["message"]
+                except Exception:
+                    out["flags"].append(f"linked to {target}; that record could not be read")
+                    continue
+                if (tm.get("type") or "") in PUBLISHED_TYPES:
+                    where = (tm.get("container-title") or [None])[0] or tm.get("publisher") or "a journal"
+                    raise Refused(
+                        f"The preprint {doi} is already published ({where}, {target}). "
+                        f"ICSAC publishes work that has not been published elsewhere.")
         else:
             out["flags"].append(f"registered with {ra}; the record was not read")
         out["verified"] = ra in ("Crossref", "DataCite")
