@@ -310,6 +310,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   objection_deadline: str = "",
                   code_link_claims: list[str] | None = None,
                   preprint_doi: str = "",
+                  exclusivity_confirmed: bool = False,
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -438,6 +439,8 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         "prior_doi_line": (
             f"Your preprint keeps its own DOI ({preprint_doi}) and stays where it is. The *Persistence* "
             f"DOI is the published version, and the two are linked in their DOI records."
+            + (" We take it that the paper is not under review elsewhere, as confirmed at submission."
+               if exclusivity_confirmed else "")
             if preprint_doi else
             "We take it that this paper has no other DOI and is not under review elsewhere, "
             "as confirmed at submission."),

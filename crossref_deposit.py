@@ -312,24 +312,20 @@ def _license(parent: ET.Element, license_id: str) -> None:
     ref.text = url
 
 
-_ARXIV_ID = re.compile(r"^(?:arxiv:)?(?:10\.48550/arxiv\.)?(\d{4}\.\d{4,5})(?:v\d+)?$", re.I)
-
-
 def preprint_doi(submission: dict) -> Optional[str]:
-    """The DOI of the preprint a DOI-route paper was submitted from (a Zenodo
-    DOI, or arXiv's 10.48550 DOI for an arXiv id), else None. The Persistence
-    article gets its own DOI and points back to it: Crossref's versioning
-    practice gives a preprint and its published version separate DOIs, linked
-    by a relation (policy 2026-09-28; the five founding papers keep their
-    Zenodo DOIs, as stated to Crossref on 2026-07-06)."""
-    if submission.get("source") != "doi":
-        return None
-    ref = (submission.get("doi") or submission.get("source_ref") or "").strip()
-    ref = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:)", "", ref, flags=re.I)
-    m = _ARXIV_ID.match(ref)
-    if m:
-        return f"10.48550/arXiv.{m.group(1)}"
-    return ref if re.match(r"^10\.\d{4,9}/\S+$", ref) else None
+    """The DOI of the preprint the paper was posted as: the DOI route's own DOI
+    (Zenodo, or arXiv's 10.48550 DOI for an arXiv id), or the upload route's
+    preprint DOI field (any server). None otherwise. The Persistence article
+    gets its own DOI and points back to it: Crossref's versioning practice
+    gives a preprint and its published version separate DOIs, linked by a
+    relation (policy 2026-09-28; the five founding papers keep their Zenodo
+    DOIs, as stated to Crossref on 2026-07-06)."""
+    import preprint_check
+    if submission.get("source") == "doi":
+        ref = submission.get("doi") or submission.get("source_ref")
+    else:
+        ref = submission.get("preprint_doi")
+    return preprint_check.normalize(ref) if ref else None
 
 
 def _relations(parent: ET.Element, submission: dict) -> None:

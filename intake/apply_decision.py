@@ -220,7 +220,7 @@ def main(argv: list[str]) -> int:
     crossref_path = (verdict == "accept" and source in ("upload", "doi")
                      and registrar == "crossref" and not (test_mode and tier == 2))
     preprint = None
-    if crossref_path and source == "doi":
+    if crossref_path:
         import crossref_deposit as _cdp
         preprint = _cdp.preprint_doi(submission)
     if crossref_path and not state_pre.get("crossref_doi"):
@@ -284,18 +284,22 @@ def main(argv: list[str]) -> int:
                           f"Will resolve to: {state_pre.get('crossref_landing_url')}"]
             else:
                 lines.append("Crossref draft: FAILED to stage -- see audit log")
-            if source == "doi":
-                lines.append(f"Preprint (linked as hasPreprint): "
-                             f"{('https://doi.org/' + preprint) if preprint else 'NOT RESOLVED -- check the relation before --live'}")
-                if not (submission.get("license") or "").lower().startswith("cc"):
-                    lines.append(f"Licence on the preprint: {submission.get('license') or 'none recorded'} "
-                                 f"-- check it before --live (the site hosts the PDF)")
-            elif state_pre.get("deposit_draft_url"):
-                lines.append(f"Zenodo archive DRAFT (unpublished): {state_pre['deposit_draft_url']}")
-            elif form.get("deposit_consent"):
-                lines.append("Zenodo archive draft: NOT staged -- see audit log")
-            else:
-                lines.append("Zenodo archive: author did not consent to deposit")
+            if preprint:
+                lines.append(f"Preprint (linked as hasPreprint): https://doi.org/{preprint}")
+                for flag in ((submission.get("preprint_meta") or {}).get("flags") or []):
+                    lines.append(f"  check the preprint: {flag}")
+            elif source == "doi":
+                lines.append("Preprint: NOT RESOLVED -- check the relation before --live")
+            if source == "doi" and not (submission.get("license") or "").lower().startswith("cc"):
+                lines.append(f"Licence on the preprint: {submission.get('license') or 'none recorded'} "
+                             f"-- check it before --live (the site hosts the PDF)")
+            if source == "upload":   # a DOI-route preprint is archived where it is
+                if state_pre.get("deposit_draft_url"):
+                    lines.append(f"Zenodo archive DRAFT (unpublished): {state_pre['deposit_draft_url']}")
+                elif form.get("deposit_consent"):
+                    lines.append("Zenodo archive draft: NOT staged -- see audit log")
+                else:
+                    lines.append("Zenodo archive: author did not consent to deposit")
             lines += ["Acceptance email: Gmail Drafts (review and send by hand).",
                       f"When ready: intake/register-doi.sh {sub_id} --live"]
             notify.send_to_curator("\n".join(lines), parse_mode=None,
@@ -419,6 +423,7 @@ def main(argv: list[str]) -> int:
         terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
         approval_url=approval_url, objection_deadline=objection_deadline,
         code_link_claims=code_link_claims, preprint_doi=preprint or "",
+        exclusivity_confirmed=form.get("exclusivity_acknowledged") is True,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).
