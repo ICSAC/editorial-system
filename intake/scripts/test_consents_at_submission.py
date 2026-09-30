@@ -10,7 +10,9 @@ the exclusions at submission (validated ids, stored, pre-ticked on the
 response page, seeded into the state when the window opens, replaced by the
 author's response), the newsletter opt-in (stored on the record, appended to
 the list only on the production path, never on a test tier), the newsletter
-module (fold, unsubscribe, token), and the unsubscribe endpoint.
+module (fold, unsubscribe, token), the unsubscribe endpoint, and the
+revised-version fields (previous ID + author note, stored, carried to the panel
+prompt and the curator escalation; the revise letters point at them).
 """
 from __future__ import annotations
 
@@ -175,6 +177,50 @@ try:
     r = client.get("/api/newsletter/unsubscribe", params={"t": "nonsense"})
     check(r.status_code == 404, f"bad token -> 404 ({r.status_code})")
     check(all(e.get("event") != "newsletter_subscribed" for e in audit), "no production subscribe event from T2 posts")
+
+
+    print("4. revised version (resubmission fields)")
+    st, resp = submit(**NEW)
+    check(record(resp).get("resubmission") is None, "no fields -> resubmission None")
+    st, resp = submit(**NEW, resubmission_of="ICSAC-SUB-NNNNN", resubmission_response="Point 1: fixed. Point 3: we disagree, the DOI is right.")
+    r = record(resp).get("resubmission") or {}
+    check(st in (200, 202) and r.get("of") == "ICSAC-SUB-NNNNN" and r.get("response", "").startswith("Point 1")
+          and r.get("previous_found") is False, f"ID upper-cased + note stored; previous not found in the test root ({st})")
+    prev_id = sid  # the exclusions paper from section 2, decided above via aa.record on an 'accept' state
+    st, resp = submit(**NEW, resubmission_of=prev_id, resubmission_response="Second round.")
+    r = record(resp).get("resubmission") or {}
+    check(r.get("previous_found") is True and r.get("previous_decision") == "accept", "previous submission found on disk with its decision")
+    resub_id = resp.get("sub_id", "")
+    st, resp = submit(**NEW, resubmission_of="SUB-9", resubmission_response="x")
+    check(st == 400 and "previous submission ID" in json.dumps(resp), f"malformed previous ID -> 400 ({st})")
+    st, resp = submit(**NEW, resubmission_response="Only a note, no ID.")
+    r = record(resp).get("resubmission") or {}
+    check(st in (200, 202) and r.get("of") is None and r.get("response") == "Only a note, no ID.", "a note without an ID is kept")
+    st, resp = submit(**NEW, resubmission_of="ICSAC-SUB-NNNNN", resubmission_response="y" * 6001)
+    check(st == 400, f"a 6001-char note -> 400 ({st})")
+
+    from intake import submission_worker as worker
+    import review
+    rd = worker._build_review_data(resub_id, subs / "test" / resub_id)
+    check((rd.get("resubmission") or {}).get("of") == prev_id and rd["resubmission"]["response"] == "Second round.",
+          "worker review_data carries the resubmission")
+    prompt = review.build_prompt(rd)
+    check("AUTHOR'S NOTE ON THIS REVISED VERSION" in prompt and "Second round." in prompt
+          and prompt.index("Second round.") < prompt.rindex("<<<END_SUBMISSION>>>"), "the note sits inside the submission block of the panel prompt")
+    rd0 = worker._build_review_data(sid, subs / "test" / sid)
+    check("(none)" in review.build_prompt(rd0).split("AUTHOR'S NOTE ON THIS REVISED VERSION")[1][:400], "a first submission renders (none)")
+    sent: list[str] = []
+    worker.notify.send_telegram = lambda msg, *a, **k: (sent.append(msg), 1)[1]
+    worker._write_incident_to_remote = lambda incident: True
+    worker._alert_remote = lambda *a, **k: None
+    worker._escalate_for_decision(resub_id, subs / "test" / resub_id, rd, {"recommendation": "RECOMMEND", "dimension_scores": {}})
+    check(sent and f"REVISED VERSION of {prev_id}" in sent[-1] and "previous decision accept" in sent[-1]
+          and "Second round." in sent[-1] and "curator_findings.md" in sent[-1], "curator escalation names the previous paper and quotes the note")
+    from intake import notify_author as na
+    for tpl in ("submission_revise_upload.md", "submission_revise_doi.md"):
+        raw = (na.TEMPLATES_DIR / tpl).read_text()
+        check("abstract field" not in raw and "new submission ID" in raw and "Revised version" in raw
+              and "a finding we got wrong is withdrawn" in raw, f"{tpl}: new ID + revised-version block + disagreement invited; no cover note in the abstract")
 
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
