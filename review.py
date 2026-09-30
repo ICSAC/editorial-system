@@ -378,7 +378,10 @@ def run_openrouter_review(prompt: str, slot, capture_path: str = None) -> dict:
         # cap mid-reasoning and `content` stays None. 4000 gives enough
         # headroom for both CoT + the 6-dim review JSON. Non-thinking
         # models stay well under and don't pay for the bump.
-        "max_tokens": 4000,
+        # 4000 -> 10000 (2026-09-29): :free models that write their reasoning
+        # into `content` spent all 4000 on it and never reached the JSON on a
+        # long paper (the output was cut before the closing brace).
+        "max_tokens": 10000,
         "provider": {"allow_fallbacks": True},
     }
     req = urllib.request.Request(
@@ -1375,9 +1378,15 @@ def _model_identity(label: str) -> str:
     s = (label or "").strip()
     parts = s.split("|")
     s = parts[-1] if parts else s
-    if s.startswith(("openrouter:", "hf:")):
-        s = s.split(":", 1)[1]
-    s = s.split(":", 1)[0]
+    segs = [p for p in s.split(":") if p]
+    if segs and segs[0] in ("openrouter", "hf"):
+        segs = segs[1:]
+    # A served HF review is labelled 'hf:<upstream>:<org>/<model>', so the
+    # model is not always the first segment: take the one that names a model
+    # (org/model). Taking the first made every HF-served reviewer 'deepinfra'
+    # and threw away a valid second HF review.
+    named = [p for p in segs if "/" in p]
+    s = named[0] if named else (segs[0] if segs else "")
     s = s.rsplit("/", 1)[-1]
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
