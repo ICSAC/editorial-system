@@ -421,6 +421,19 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # The curation team's findings for a revise letter: <sub_dir>/curator_findings.md,
+    # written by the curator before deciding (markdown, numbered points). The
+    # letter's "Curation team findings" section is this file; without it the
+    # draft carries a loud bracket and cannot be sent as is.
+    curator_findings = ""
+    findings_path = sub_dir / "curator_findings.md"
+    if verdict == "revise" and findings_path.exists():
+        curator_findings = findings_path.read_text().strip()
+        print(f"  curator findings: {findings_path} ({len(curator_findings)} chars)", file=sys.stderr)
+    elif verdict == "revise" and code_link_claims is None:
+        print(f"  curator findings: {findings_path} not found; the draft carries a placeholder "
+              f"bracket to fill before sending", file=sys.stderr)
+
     ok, info = notify_author.send_decision(
         to=form["email"], sub_id=sub_id, title=title,
         author_name=_salutation_name(form["name"]), verdict=verdict,
@@ -437,6 +450,7 @@ def main(argv: list[str]) -> int:
         approval_url=approval_url, objection_deadline=objection_deadline,
         code_link_claims=code_link_claims, preprint_doi=preprint or "",
         exclusivity_confirmed=form.get("exclusivity_acknowledged") is True,
+        curator_findings=curator_findings,
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).

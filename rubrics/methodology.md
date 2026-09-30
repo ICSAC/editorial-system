@@ -12,7 +12,14 @@ This document defines what ICSAC considers transparent, rigorous methodology. Sc
 
 - Proofs must be verifiable step-by-step. Hand-waving ("it can be shown that...") without supporting derivation is a methodological deficiency.
 - Assumptions must be stated explicitly. Hidden assumptions in proofs or derivations should be flagged.
+- **Assumptions must hold where the paper applies the result.** A theorem whose assumptions the paper's own examples violate (a continuity or density assumption applied where it cannot hold; an independence assumption applied to coupled data) does not support those examples. Name the assumption and the example.
 - Novel notation must be defined at first use.
+- Proof checking is a curator step: the reviewer panel judges whether a proof is presented verifiably and whether its assumptions are stated and met; the curation team checks the proof itself before a decision.
+
+## Claims About Code
+
+- A claim about what the submission's code does ("the script computes X", "the analysis operationalizes the measure defined in §N", "reproducible", "holds by construction") is a claim about the code, and must be checked against the code package digest and cited to a file and line. A paper whose shipped code computes something other than the construct it names has not operationalized that construct.
+- Where no code package could be read, a claim about the code is unverified, not verified.
 
 ## Empirical Work
 

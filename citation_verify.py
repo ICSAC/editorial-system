@@ -13,7 +13,7 @@ Pipeline shape:
                             │
                             ▼
                     verify_all (parallel HTTP only)
-                            │   arXiv ─► Crossref ─► Semantic Scholar
+                            │   arXiv ─► Crossref/DataCite ─► Semantic Scholar
                             ▼
                     build_verification_report (markdown for prompt injection)
 
@@ -21,6 +21,19 @@ claude is invoked once per submission (extraction). Verification is pure
 HTTP — no LLM cost. Phase 2 (citation_misattribution) layers a single
 batched OpenRouter call on top to score whether each cited work supports
 the submission's claim.
+
+DOI identity: a citation that carries a DOI is
+judged by THAT DOI. The DOI is resolved (Crossref, then DataCite for Zenodo
+and other DataCite prefixes) and the record's title is compared with the
+cited title. A DOI that does not resolve is `doi-dead`; one that resolves to
+a different work is `doi-mismatch`; neither is ever "verified", whatever a
+title or author-year search finds afterwards -- the search only names the
+probable intended record, for the panel and the decision letter. Before this
+a reference assembled from several works (right title, wrong authors, another
+paper's DOI) or one with a dead DOI could reach the panel as REAL, and the prompt made
+that binding. CiteStamp is asked about every confirmed DOI in Phase 3
+(citestamp_check); its MCP returns no titles, so it cannot decide identity,
+and a confirmed DOI it does not know is logged as a coverage gap.
 
 All HTTP failures degrade gracefully — citations are marked unverifiable
 rather than blocking the panel run. extract_citations failure raises and
@@ -375,6 +388,122 @@ def _fetch_crossref(doi: str) -> dict | None:
     }
 
 
+def _fetch_datacite(doi: str) -> dict | None:
+    """DataCite REST: GET https://api.datacite.org/dois/<doi>. Zenodo, Dryad,
+    figshare and most data DOIs live here, not on Crossref. Returns the same
+    verifier shape as _fetch_crossref, or None on 404 / parse / network error."""
+    if not doi:
+        return None
+    import urllib.request as _ur, urllib.error as _ue
+    url = f"https://api.datacite.org/dois/{urllib.parse.quote(doi, safe='/')}"
+    req = _ur.Request(url, headers={"User-Agent": CITATION_USER_AGENT,
+                                    "Accept": "application/vnd.api+json"})
+    try:
+        with _ur.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (_ue.HTTPError, _ue.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        return None
+    attrs = ((data.get("data") or {}).get("attributes")) or {}
+    titles = [t.get("title", "").strip() for t in attrs.get("titles") or [] if isinstance(t, dict)]
+    title = next((t for t in titles if t), "")
+    if not title:
+        return None
+    descs = attrs.get("descriptions") or []
+    abstract = ""
+    for d in descs:
+        if isinstance(d, dict) and d.get("description"):
+            abstract = re.sub(r"<[^>]+>", "", str(d["description"])).strip()
+            break
+    authors = []
+    for c in attrs.get("creators") or []:
+        if not isinstance(c, dict):
+            continue
+        name = (c.get("name") or "").strip()
+        if not name:
+            name = " ".join(x for x in (c.get("givenName", ""), c.get("familyName", "")) if x).strip()
+        if name:
+            authors.append(name)
+    year = attrs.get("publicationYear")
+    try:
+        year = int(year) if year else None
+    except (TypeError, ValueError):
+        year = None
+    return {
+        "resolver": "datacite",
+        "resolved_id": (attrs.get("doi") or doi).lower(),
+        "title": title,
+        "abstract": abstract,
+        "year": year,
+        "authors": authors,
+    }
+
+
+def _resolve_doi_identity(c: dict) -> dict:
+    """Judge a citation by the DOI it carries. Returns
+    {"status": "confirmed"|"mismatch"|"dead", "record": <resolver dict>|None,
+     "reason": str, "title_ok": bool|None, "authors_ok": bool|None, "year_ok": bool|None}.
+
+    confirmed: the DOI resolves and the cited title matches the record's
+               title; or the citation has no usable title and BOTH the author
+               surnames and the year (±1) agree with the record.
+    mismatch:  the DOI resolves to a record whose title (and, when there is
+               no title to compare, whose authors or year) disagrees with the
+               citation. The DOI belongs to another work.
+    dead:      neither Crossref nor DataCite has the DOI.
+    """
+    doi = (c.get("doi") or "").strip()
+    rec = _fetch_crossref(doi) or _fetch_datacite(doi)
+    if not rec:
+        return {"status": "dead", "record": None, "title_ok": None, "authors_ok": None,
+                "year_ok": None,
+                "reason": f"Cited DOI {doi} does not resolve on Crossref or DataCite."}
+    cited_title = (c.get("title") or "").strip()
+    authors = c.get("authors") or []
+    authors_ok = _author_overlap(authors, rec.get("authors") or []) if authors else None
+    year_ok = None
+    if c.get("year") and rec.get("year"):
+        try:
+            year_ok = abs(int(c["year"]) - int(rec["year"])) <= 1
+        except (TypeError, ValueError):
+            year_ok = None
+    if len(_normalize_for_match(cited_title)) >= 8:
+        title_ok = _title_matches(cited_title, rec["title"])
+        if title_ok:
+            return {"status": "confirmed", "record": rec, "title_ok": True,
+                    "authors_ok": authors_ok, "year_ok": year_ok,
+                    "reason": f"DOI {doi} resolved on {rec['resolver']}; the record's title matches the cited title."}
+        extra = []
+        if authors_ok is False:
+            extra.append("the authors differ too")
+        if year_ok is False:
+            extra.append(f"the record is dated {rec.get('year')}, the citation {c.get('year')}")
+        tail = (" (" + "; ".join(extra) + ")") if extra else ""
+        dated = f" ({rec['year']})" if rec.get("year") else ""
+        return {"status": "mismatch", "record": rec, "title_ok": False,
+                "authors_ok": authors_ok, "year_ok": year_ok,
+                "reason": (f"DOI {doi} resolves on {rec['resolver']} to *{rec['title']}*{dated}, "
+                           f"not to the cited *{cited_title}*{tail}.")}
+    # No title to compare: the identifier stands on authors + year.
+    if authors_ok and year_ok:
+        return {"status": "confirmed", "record": rec, "title_ok": None,
+                "authors_ok": True, "year_ok": True,
+                "reason": f"DOI {doi} resolved on {rec['resolver']}; author surname and year agree (no cited title to compare)."}
+    if authors_ok is None and year_ok is None:
+        # Nothing to compare at all: the DOI exists, and that is all we know.
+        return {"status": "confirmed", "record": rec, "title_ok": None,
+                "authors_ok": None, "year_ok": None,
+                "reason": f"DOI {doi} resolved on {rec['resolver']}; the citation carries no title, author or year to compare."}
+    what = []
+    if authors_ok is False:
+        what.append("author surnames")
+    if year_ok is False:
+        what.append("year")
+    return {"status": "mismatch", "record": rec, "title_ok": None,
+            "authors_ok": authors_ok, "year_ok": year_ok,
+            "reason": (f"DOI {doi} resolves on {rec['resolver']} to *{rec['title']}* but the "
+                       f"{' and '.join(what) or 'metadata'} disagree with the citation (no cited title to compare).")}
+
+
 def _search_semanticscholar(query: str, year: int | None = None) -> dict | None:
     """Internal S2 search. Returns the best-matching candidate (top hit)
     as a verification-shaped dict, or None on miss / network error."""
@@ -466,6 +595,7 @@ def _normalize_for_match(s: str) -> str:
     """Canonicalize a string for fuzzy comparison."""
     if not s:
         return ""
+    s = re.sub(r"<[^>]+>", " ", s)   # Crossref titles carry JATS/HTML tags (<i>f</i>)
     s = s.lower()
     s = re.sub(r"[^a-z0-9]+", " ", s)
     return " ".join(s.split())
@@ -511,8 +641,32 @@ def _author_overlap(claimed: list[str], resolved: list[str]) -> bool:
     return bool(claimed_set & resolved_tokens)
 
 
+def _find_probable_record(c: dict) -> dict | None:
+    """After a dead or mismatching DOI: search the registries by the cited
+    title (and authors) and return the top candidate whose TITLE matches, or
+    None. Never marks anything verified; it names the record the author
+    probably meant, for the panel and the decision letter."""
+    title = (c.get("title") or "").strip()
+    if len(_normalize_for_match(title)) < 8:
+        return None
+    authors = c.get("authors") or []
+    year = c.get("year")
+    candidates = []
+    terms = [title] + [re.split(r"[\s,]+", a.strip())[-1] for a in authors[:1] if a.strip()]
+    for fn, arg in ((_search_arxiv, terms), (_search_semanticscholar, title),
+                    (_search_crossref_bibliographic, c.get("raw") or title)):
+        try:
+            r = fn(arg, year=year)
+        except Exception:
+            r = None
+        if r and _title_matches(title, r.get("title") or ""):
+            candidates.append(r)
+            break
+    return candidates[0] if candidates else None
+
+
 def verify_citation(c: dict) -> dict:
-    """Single citation lookup — arXiv → Crossref → Semantic Scholar.
+    """Single citation lookup — arXiv → Crossref/DataCite → Semantic Scholar.
 
     Order matters. Exact-id resolvers (arXiv ID, DOI) get exact-id
     confidence. Title-author search via S2 ranges from title-author-match
@@ -552,10 +706,16 @@ def verify_citation(c: dict) -> dict:
             })
             return out
 
-    # 2. DOI exact-id (Crossref)
+    # 2. DOI identity (Crossref, then DataCite). The DOI decides: a confirmed
+    #    DOI is verified; a dead or mismatching DOI is NOT, and the fuzzy
+    #    searches below may only name the probable intended record.
+    doi_verdict = None
     if c.get("doi"):
-        r = _fetch_crossref(c["doi"])
-        if r:
+        doi_verdict = _resolve_doi_identity(c)
+        out["doi_identity"] = doi_verdict["status"]
+        out["doi_identity_reason"] = doi_verdict["reason"]
+        r = doi_verdict.get("record")
+        if doi_verdict["status"] == "confirmed":
             out.update({
                 "verified": True,
                 "resolver": r["resolver"],
@@ -563,9 +723,25 @@ def verify_citation(c: dict) -> dict:
                 "title": r["title"],
                 "abstract": r["abstract"],
                 "confidence": "exact-id",
-                "reason": f"DOI {c['doi']} resolved on Crossref.",
+                "reason": doi_verdict["reason"],
             })
             return out
+        if r:
+            # mismatch: keep what the DOI points at, so the report can show it
+            out["resolved_id"] = r["resolved_id"]
+            out["resolved_title"] = r["title"]
+            out["resolved_year"] = r.get("year")
+        out["confidence"] = "doi-dead" if doi_verdict["status"] == "dead" else "doi-mismatch"
+        out["reason"] = doi_verdict["reason"]
+        suggestion = _find_probable_record(c)
+        if suggestion:
+            out["suggested_id"] = suggestion["resolved_id"]
+            out["suggested_title"] = suggestion["title"]
+            out["suggested_year"] = suggestion.get("year")
+            dated = f" ({suggestion['year']})" if suggestion.get("year") else ""
+            out["reason"] += (f" A registry search finds a record matching the cited title: "
+                              f"{suggestion['resolved_id']} — *{suggestion['title']}*{dated}.")
+        return out
 
     # 3. arXiv title+author search (free, well-behaved rate limits, high
     #    signal for arXiv-hosted preprints which dominate our corpus).
@@ -681,7 +857,12 @@ def verify_citation(c: dict) -> dict:
                 c.get("year") and r.get("year")
                 and abs(int(c["year"]) - int(r["year"])) <= 1
             )
-            if (title_ok and authors_ok) or (title_ok and year_ok) or (authors_ok and year_ok):
+            # author-year alone counts only when the citation has NO title to
+            # compare: a cited title the candidate does not carry means the
+            # registry found a different work by the same author (another
+            # preprint by that author would otherwise be reported as REAL).
+            has_title = len(_normalize_for_match(c.get("title") or "")) >= 8
+            if (title_ok and authors_ok) or (title_ok and year_ok) or (authors_ok and year_ok and not has_title):
                 conf = ("title-author-match" if (title_ok and authors_ok)
                         else "title-year-match" if title_ok
                         else "author-year-match")   # no title agreement: existence only (item 16)
@@ -699,6 +880,10 @@ def verify_citation(c: dict) -> dict:
                 "Crossref bibliographic-query returned a candidate but "
                 "title + author + year did not co-confirm."
             )
+            if has_title and authors_ok and not title_ok:
+                out["reason"] = (
+                    f"The closest registry record by the same author is a different work "
+                    f"(*{r['title']}*, {r.get('resolved_id')}); the cited title was not found.")
             return out
 
     out["reason"] = "No exact identifier and no title for catalog search."
@@ -729,14 +914,29 @@ def verify_all(citations: list[dict], max_concurrent: int = 8) -> list[dict]:
                     "reason": f"verifier raised: {type(e).__name__}",
                 }
             merged = dict(citations[i])
-            if merged.get("verified") and not v.get("verified"):
+            # The resolver's title overwrites `title` below (downstream readers
+            # expect the registry title there); keep what the paper cited.
+            if "cited_title" not in merged:
+                merged["cited_title"] = citations[i].get("title")
+            if merged.get("verified") and not v.get("verified") and v.get("doi_identity") not in ("dead", "mismatch"):
                 # A recheck that could not confirm never downgrades a citation
-                # verified earlier (audit 2026-09-28 item 17).
+                # verified earlier (audit 2026-09-28 item 17) -- unless the
+                # citation's own DOI now disagrees: that is a finding, not a miss.
                 merged["recheck_reason"] = str(v.get("reason", ""))[:200]
             else:
                 merged.update(v)
             results[i] = merged
     return results
+
+
+def identity_counts(citations: list[dict]) -> dict:
+    """{'confirmed': n, 'mismatch': n, 'dead': n} over citations that carry a DOI."""
+    counts = {"confirmed": 0, "mismatch": 0, "dead": 0}
+    for c in citations:
+        s = c.get("doi_identity")
+        if s in counts:
+            counts[s] += 1
+    return counts
 
 
 def build_verification_report(citations: list[dict]) -> str:
@@ -746,34 +946,71 @@ def build_verification_report(citations: list[dict]) -> str:
     if not citations:
         return ""
 
-    verified = [c for c in citations if c.get("verified")]
-    unverifiable = [c for c in citations if not c.get("verified")]
+    confirmed = [c for c in citations if c.get("verified") and c.get("confidence") == "exact-id"]
+    matched = [c for c in citations if c.get("verified") and c.get("confidence") != "exact-id"]
+    disagree = [c for c in citations if not c.get("verified") and c.get("doi_identity") in ("mismatch", "dead")]
+    unverifiable = [c for c in citations if not c.get("verified") and c not in disagree]
 
     lines = [
         "## Citation verification (independently verified before review)",
         "",
-        "The following citations from this submission have been checked",
-        "against arXiv, Crossref, and Semantic Scholar before this review.",
-        "The panel must use this as ground truth on fabrication and shift",
-        "any citation_integrity scoring concern to misattribution (citation",
-        "exists but does not support the claim) when applicable.",
+        "Every reference in this submission was checked against Crossref, DataCite,",
+        "arXiv and Semantic Scholar before this review. Each line carries its",
+        "evidence level; weigh it as stated, not as a blanket verdict:",
+        "",
+        "- CONFIRMED [exact-id]: the cited identifier (DOI or arXiv ID) resolves and",
+        "  its record matches the cited title (or the authors and year when no title",
+        "  was cited). The work exists as cited. Do not call it fabricated.",
+        "- MATCHED [title-author-match / title-year-match / author-year-match]: no",
+        "  identifier was cited; a registry record matching the citation's text was",
+        "  found. The work exists; the match is textual and could be a neighbouring",
+        "  work. Do not call it fabricated; you may question whether it is the work",
+        "  meant, and you must read it as an existence check, not as confirmation of",
+        "  the cited authors, venue or pages.",
+        "- DOI MISMATCH: the citation carries a DOI that resolves to a DIFFERENT work.",
+        "  DOI DEAD: the cited DOI resolves nowhere. Both are citation-integrity",
+        "  defects in their own right (a wrong identifier, wrong authors, or a",
+        "  reference assembled from pieces of several works); score them under",
+        "  citation_integrity and name them in the justification. Where a record",
+        "  matching the cited title exists it is given, so the author can be pointed",
+        "  to it.",
+        "- UNVERIFIABLE: no registry record was found. Not evidence of fabrication.",
         "",
     ]
 
-    if verified:
-        lines.append("### Verified to exist (do NOT call these fabricated)")
+    def _line(c: dict, tag: str) -> str:
+        label = _short_label(c)
+        resolved = c.get("resolved_id") or "—"
+        title = c.get("title") or "(title not returned by resolver)"
+        year = c.get("year") or _extract_year_from_resolved(c) or "n.d."
+        claim = c.get("claim_context") or ""
+        tail = f" Submission claim context: \"{claim}\"" if claim else ""
+        return (f"- **{label}** — {tag}. {resolved} — *{title}* "
+                f"({year}). [{c.get('confidence', 'verified')}].{tail}")
+
+    if confirmed:
+        lines.append("### Confirmed by identifier (do NOT call these fabricated)")
         lines.append("")
-        for c in verified:
+        lines.extend(_line(c, "CONFIRMED") for c in confirmed)
+        lines.append("")
+
+    if matched:
+        lines.append("### Matched by text, no identifier cited (exists; identity not confirmed)")
+        lines.append("")
+        lines.extend(_line(c, "MATCHED") for c in matched)
+        lines.append("")
+
+    if disagree:
+        lines.append("### Cited DOI disagrees with the citation (citation-integrity findings)")
+        lines.append("")
+        for c in disagree:
             label = _short_label(c)
-            resolved = c.get("resolved_id") or "—"
-            title = c.get("title") or "(title not returned by resolver)"
-            year = c.get("year") or _extract_year_from_resolved(c) or "n.d."
-            claim = c.get("claim_context") or ""
-            tail = f" Submission claim context: \"{claim}\"" if claim else ""
-            lines.append(
-                f"- **{label}** — REAL. {resolved} — *{title}* "
-                f"({year}). [{c.get('confidence', 'verified')}].{tail}"
-            )
+            tag = "DOI DEAD" if c.get("doi_identity") == "dead" else "DOI MISMATCH"
+            cited = c.get("cited_title") or c.get("title") or ""
+            head = f"- **{label}** — {tag}."
+            if cited and c.get("doi_identity") == "mismatch":
+                head += f" Cited as *{cited}* with DOI {c.get('doi')}."
+            lines.append(f"{head} {c.get('reason') or ''}".rstrip())
         lines.append("")
 
     if unverifiable:

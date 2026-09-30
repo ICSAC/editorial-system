@@ -184,7 +184,43 @@ def check_citations(citations: list[dict], *, log=print) -> dict:
         out["supported"] += int(bool(row["supported_by"]))
     log(f"  citestamp: {out['queried']} DOIs queried, {out['checked']} answered, {out['unchecked']} unchecked -- "
         f"{out['in_graph']} in graph, {out['refuted']} with refutations on record, {out['supported']} with supports")
+    out["coverage_gaps"] = _log_coverage_gaps(citations, out["results"], log=log)
     return out
+
+
+COVERAGE_GAP_LOG = getattr(config, "CITESTAMP_COVERAGE_GAP_LOG",
+                           os.path.join(getattr(config, "REVIEWS_DIR", "reviews"), "citestamp_coverage_gaps.jsonl"))
+
+
+def _log_coverage_gaps(citations: list[dict], results: list[dict], *, log=print) -> int:
+    """A DOI whose identity Crossref/DataCite CONFIRMED and that CiteStamp does
+    not know is a coverage gap in the graph, not a doubt about the citation.
+    Append each one (DOI, registry title, year) to a JSONL file so the gaps
+    can be fed to CiteStamp later. A dead or mismatching DOI is never logged:
+    the graph is right not to have it. Returns the number logged."""
+    by_doi = {r["doi"].lower(): r for r in results if r.get("doi")}
+    rows = []
+    for c in citations:
+        if c.get("doi_identity") != "confirmed":
+            continue
+        doi = _doi_of(c)
+        r = by_doi.get((doi or "").lower())
+        if not doi or not r or r.get("error") or r.get("in_graph"):
+            continue
+        rows.append({"doi": doi.lower(), "title": (c.get("title") or "")[:300],
+                     "year": c.get("year"), "resolver": c.get("resolver"),
+                     "logged": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    if not rows:
+        return 0
+    try:
+        os.makedirs(os.path.dirname(COVERAGE_GAP_LOG), exist_ok=True)
+        with open(COVERAGE_GAP_LOG, "a") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
+        log(f"  citestamp: {len(rows)} confirmed DOI(s) not in the graph logged to {COVERAGE_GAP_LOG}")
+    except OSError as e:
+        log(f"  citestamp: coverage-gap log not written ({e})")
+    return len(rows)
 
 
 def attribution_line(res: dict) -> str:

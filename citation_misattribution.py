@@ -236,6 +236,12 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
         "or|google/gemma-4-31b-it:free",
         "or|qwen/qwen3.8-27b:free",
     ]
+    # A hand-run paid OpenRouter pass (config.OR_PAID_MODELS) leads here too;
+    # without it, a run with a paid panel gets no misattribution verdicts because this
+    # chain has no paid entry while the panel does.
+    paid = getattr(config, "OR_PAID_MODELS", None) or []
+    if paid:
+        chain = [f"or|{paid[0]}"] + chain
 
     raw = _call_chain(prompt, chain)
     if not raw:

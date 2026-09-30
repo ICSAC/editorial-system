@@ -331,6 +331,12 @@ def _build_review_data(sub_id: str, sub_dir: Path) -> dict:
         "version": "1",
         "pdf_path": pdf_path,
         "full_text": full_text,
+        # The panel's code package digest (code_digest.py) reads the declared
+        # code/data links off the submission record; nothing else reads this.
+        "submission": {
+            "code_data": submission.get("code_data") or {},
+            "related_identifiers": submission.get("related_identifiers") or [],
+        },
         "raw_metadata": {
             "submission": {
                 "sub_id": sub_id,
@@ -522,6 +528,12 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
             f"Disagreement: {'yes' if aggregate.get('disagreement', False) else 'no'}\n"
             f"RQC flag: {rqc_flag}\n\n"
             f"Per-dimension means:\n{score_block}\n\n"
+            f"Curator checklist (the panel does not do these):\n"
+            f"  1. Proofs: read every theorem's proof yourself; the panel checks form, not proofs.\n"
+            f"  2. Code: open reviews/{sub_id}_code_digest.md; does the code compute what the paper names?\n"
+            f"  3. Assumptions: do the theorems' assumptions hold in the paper's own examples?\n"
+            f"  4. References: any DOI MISMATCH / DOI DEAD lines in reviews/{sub_id}_citations.md go in the letter.\n"
+            f"  5. A revise letter reads <sub_dir>/curator_findings.md; write it before deciding.\n\n"
             f"Your call: accept / revise / scope_reject\n"
             f"(Reply on the curator's configured reply channel; "
             f"or 'park' to shelve until later.)"
