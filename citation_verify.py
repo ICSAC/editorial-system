@@ -472,6 +472,17 @@ def _resolve_doi_identity(c: dict) -> dict:
             return {"status": "confirmed", "record": rec, "title_ok": True,
                     "authors_ok": authors_ok, "year_ok": year_ok,
                     "reason": f"DOI {doi} resolved on {rec['resolver']}; the record's title matches the cited title."}
+        if authors_ok and year_ok:
+            # Same authors, same year, a different title: the record's title in
+            # another language or an earlier wording (a work cited by its
+            # English title while the registry
+            # record is in the original language). The DOI is taken as right and the variant
+            # is shown beside it, so a reader can still see the difference.
+            return {"status": "confirmed", "record": rec, "title_ok": False,
+                    "authors_ok": True, "year_ok": True, "title_variant": True,
+                    "reason": (f"DOI {doi} resolved on {rec['resolver']}; the record's title is "
+                               f"*{rec['title']}*, cited as *{cited_title}* — authors and year agree, "
+                               f"read as the same work under a translated or variant title.")}
         extra = []
         if authors_ok is False:
             extra.append("the authors differ too")
@@ -725,6 +736,8 @@ def verify_citation(c: dict) -> dict:
                 "confidence": "exact-id",
                 "reason": doi_verdict["reason"],
             })
+            if doi_verdict.get("title_variant"):
+                out["title_variant"] = True
             return out
         if r:
             # mismatch: keep what the DOI points at, so the report can show it
@@ -985,8 +998,12 @@ def build_verification_report(citations: list[dict]) -> str:
         year = c.get("year") or _extract_year_from_resolved(c) or "n.d."
         claim = c.get("claim_context") or ""
         tail = f" Submission claim context: \"{claim}\"" if claim else ""
+        variant = ""
+        if c.get("title_variant") and c.get("cited_title"):
+            variant = (f" Cited as *{c['cited_title']}*: a translated or variant title of the same "
+                       f"record (authors and year agree).")
         return (f"- **{label}** — {tag}. {resolved} — *{title}* "
-                f"({year}). [{c.get('confidence', 'verified')}].{tail}")
+                f"({year}). [{c.get('confidence', 'verified')}].{variant}{tail}")
 
     if confirmed:
         lines.append("### Confirmed by identifier (do NOT call these fabricated)")

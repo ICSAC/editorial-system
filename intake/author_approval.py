@@ -159,8 +159,16 @@ def issue(sub_dir: Path, *, days: Optional[int] = None, force: bool = False) -> 
         "window_closed_pinged": False,
     }
     _save(sub_dir, rec)
+    # Exclusions ticked at SUBMISSION (2026-09-30) bind from the moment the
+    # window opens, so a window that lapses with no response still honours
+    # them; an approval later replaces them with the response's list (the
+    # page pre-ticks the same boxes).
+    seeded = submission_exclusions(sub_dir)
     _update_state(sub_dir, author_approval_status="pending",
-                  author_window_deadline=rec["deadline"])
+                  author_window_deadline=rec["deadline"],
+                  **({"author_exclusions": seeded,
+                      "promotion_opt_out": bool(set(seeded) & PROMOTION_IDS),
+                      "persistence_opt_out": "persistence" in seeded} if seeded else {}))
     t = f"{sub_dir.name}.{token}"
     base = getattr(config, "SITE_BASE_URL", "https://icsacinstitute.org").rstrip("/")
     return {"token": t, "url": f"{base}/approve/?t={t}",
@@ -182,6 +190,17 @@ def resolve(t: str) -> tuple[Path, dict]:
     if not secrets.compare_digest(rec["token_sha256"], hashlib.sha256(token.encode()).hexdigest()):
         raise ValueError("bad token")
     return sub_dir, rec
+
+
+def submission_exclusions(sub_dir: Path) -> list[str]:
+    """The categories the author excluded on the submission form (2026-09-30),
+    validated against CATEGORY_IDS; [] when the form predates the block."""
+    try:
+        sub = json.loads((Path(sub_dir) / "submission.json").read_text())
+    except Exception:
+        return []
+    raw = (sub.get("form") or {}).get("exclusions_at_submission") or []
+    return sorted({str(x) for x in raw if str(x) in CATEGORY_IDS})
 
 
 def public_view(sub_dir: Path, rec: dict) -> dict:
@@ -215,7 +234,10 @@ def public_view(sub_dir: Path, rec: dict) -> dict:
         "deadline_display": _display(deadline),
         "window_open": _now() < deadline,
         "status": rec.get("status", "pending"),
-        "exclusions": list(last.get("exclusions") or []),
+        # Before any response the page pre-ticks what the author excluded at
+        # submission; after one, the response's list.
+        "exclusions": (list(last.get("exclusions") or []) if last
+                       else submission_exclusions(sub_dir)),
         "quote_ok": bool(last.get("quote_ok")),
         "responded_at": last.get("at"),
         "categories": CATEGORIES,
