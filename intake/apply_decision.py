@@ -68,10 +68,25 @@ def _audit(event: dict, *, test_mode: bool = False) -> None:
         f.write(json.dumps(payload) + "\n")
 
 
+_NAME_PARTICLES = {"de", "da", "di", "del", "della", "van", "von", "der", "den", "la", "le",
+                   "du", "dos", "das", "bin", "al", "y", "e"}
+
+
 def _salutation_name(name: str) -> str:
-    """'[author] [author]' -> '[author] [author]': forms arrive with surnames in
-    capitals; the salutation should not shout (2026-09-28)."""
-    return " ".join(t.title() if (t.isupper() and len(t) > 1) else t for t in (name or "").split())
+    """'[author] [author]' -> '[author] [author]', '[author] [author]' -> '[author] [author]':
+    forms arrive with surnames in capitals (2026-09-28) or typed all in lower
+    case (2026-09-30); the salutation should read as a name. A token already in
+    mixed case is left alone; lower-case particles (de, van, ...) stay lower
+    unless they open the name."""
+    out = []
+    for i, t in enumerate((name or "").split()):
+        if t.isupper() and len(t) > 1:
+            out.append(t.title())
+        elif t.islower() and (i == 0 or t not in _NAME_PARTICLES):
+            out.append(t[:1].upper() + t[1:])
+        else:
+            out.append(t)
+    return " ".join(out)
 
 
 def _curator_routing(test_mode: bool, tier: int) -> dict:
