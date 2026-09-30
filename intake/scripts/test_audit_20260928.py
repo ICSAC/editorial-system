@@ -130,6 +130,16 @@ try:
           == review._model_identity("oai|sambanova|Qwen3-235B-A22B-Instruct-2507"), "dedupe: one model, three labels, one identity")
     check(review._model_identity("or|google/gemma-4-31b-it:free") != review._model_identity("or|google/gemma-4-26b-a4b-it:free"),
           "dedupe: different models stay distinct")
+    check(review._model_identity("hf:deepinfra:deepseek-ai/DeepSeek-V4-Flash")
+          != review._model_identity("hf:deepinfra:Qwen/Qwen3-235B-A22B-Instruct-2507"),
+          "dedupe: two models served by the same HF upstream stay distinct")
+    check(review._model_identity("hf:deepinfra:Qwen/Qwen3-235B-A22B-Instruct-2507")
+          == review._model_identity("hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra")
+          == review._model_identity("oai|sambanova|Qwen3-235B-A22B-Instruct-2507"),
+          "dedupe: a served HF label matches its chain entry and the same model elsewhere")
+    check(review._model_identity("hf:unknown:google/gemma-4-31B-it") == review._model_identity("or|google/gemma-4-31b-it:free"),
+          "dedupe: an unknown HF upstream still names the model")
+    check(review._model_identity("claude") == "claude", "dedupe: claude stays claude")
     orig_slot, orig_retries = review._run_slot, getattr(review.config, "MAX_SLOT_RETRIES", 1)
     review.config.MAX_SLOT_RETRIES = 0
     review._run_slot = lambda prompt, i, s, record_id=None, pass_idx=0: {
