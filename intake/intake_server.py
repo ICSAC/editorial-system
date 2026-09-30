@@ -382,6 +382,19 @@ def _validate_submitter(d: dict) -> dict:
     else:
         exclusivity = str(exclusivity_raw).lower() in ("on", "true", "1", "yes")
 
+    # Consents at submission (2026-09-30, the curator's spec of 09-28). The form
+    # sends `form_version` from the day the block shipped; a post that carries
+    # it must carry the process acknowledgement too. Older forms (and the API
+    # contract of the tests) send neither and are accepted unchanged.
+    form_version = (str(d.get("form_version") or "").strip())[:32]
+    process_ack = str(d.get("process_ack") or "").lower() in ("on", "true", "1", "yes")
+    process_ack_version = (str(d.get("process_ack_version") or "").strip())[:32]
+    newsletter_raw = d.get("newsletter_opt_in")
+    newsletter_opt_in = (None if newsletter_raw is None
+                         else str(newsletter_raw).lower() in ("on", "true", "1", "yes"))
+    excl_raw = d.get("exclusions")
+    exclusions = sorted({x.strip() for x in str(excl_raw or "").split(",") if x.strip()})
+
     errs = []
     if len(name) < 2 or len(name) > 200:
         errs.append("name must be 2–200 chars")
@@ -393,13 +406,31 @@ def _validate_submitter(d: dict) -> dict:
         errs.append("ORCID must be of the form 0000-0000-0000-0000")
     if not coi:
         errs.append("conflict-of-interest acknowledgement required")
+    if form_version and not process_ack:
+        errs.append("the acknowledgement of how ICSAC reviews and publishes is required")
+    if process_ack and not process_ack_version:
+        errs.append("process_ack_version missing")
+    if exclusions:
+        from . import author_approval  # local
+        bad = [x for x in exclusions if x not in author_approval.CATEGORY_IDS]
+        if bad:
+            errs.append(f"unknown exclusion(s): {', '.join(bad)[:100]}")
     if errs:
         raise HTTPException(400, {"error": "validation_failed", "details": errs})
 
+    now = _now_iso()
     return {
         "name": name, "email": email,
         "orcid": orcid, "coi_acknowledged": True,
         "exclusivity_acknowledged": exclusivity,
+        "form_version": form_version or None,
+        "process_ack": True if process_ack else None,
+        "process_ack_version": process_ack_version if process_ack else None,
+        "process_ack_at": now if process_ack else None,
+        "newsletter_opt_in": newsletter_opt_in,
+        "newsletter_opt_in_at": now if newsletter_opt_in else None,
+        "newsletter_wording_version": process_ack_version if newsletter_opt_in else None,
+        "exclusions_at_submission": exclusions,
     }
 
 
@@ -1121,6 +1152,12 @@ async def api_submit(request: Request):
         "coi": form.get("coi", ""),
         # Never passed before 2026-09-28, so every submission stored None.
         "exclusivity_acknowledged": form.get("exclusivity_acknowledged"),
+        # Consents at submission (2026-09-30): all optional for older forms.
+        "form_version": form.get("form_version"),
+        "process_ack": form.get("process_ack"),
+        "process_ack_version": form.get("process_ack_version"),
+        "newsletter_opt_in": form.get("newsletter_opt_in"),
+        "exclusions": form.get("exclusions"),
     })
     code_data = _parse_code_data(form.get("code_data_available"), form.get("code_data_url"))
 
@@ -1377,7 +1414,27 @@ async def api_submit(request: Request):
         "pdf_size_bytes": pdf_size,
         "auth_orcid": auth_orcid or None,
         "auth_verified": bool(auth_orcid),
+        "process_ack_version": submitter.get("process_ack_version"),
+        "exclusions_at_submission": submitter.get("exclusions_at_submission") or [],
+        "newsletter_opt_in": bool(submitter.get("newsletter_opt_in")),
     })
+
+    # Newsletter opt-in (production only; the test tiers returned above). The
+    # list is append-only JSONL under the submissions root, in the nightly
+    # backup. A failure here never fails the submission.
+    if submitter.get("newsletter_opt_in"):
+        try:
+            from . import newsletter  # local
+            newsletter.subscribe(
+                SUBMISSIONS_ROOT, email=submitter["email"], name=submitter["name"],
+                sub_id=sub_id, wording_version=submitter.get("newsletter_wording_version") or "",
+                consented_at=submitter.get("newsletter_opt_in_at"))
+            _audit_append({"sub_id": sub_id, "event": "newsletter_subscribed",
+                           "wording_version": submitter.get("newsletter_wording_version")})
+        except Exception as exc:
+            print(f"newsletter subscribe failed (non-fatal): {exc}", file=sys.stderr)
+            _audit_append({"sub_id": sub_id, "event": "newsletter_subscribe_failed",
+                           "error": str(exc)[:200]})
 
     # Send the "received" email NOW only when we have a real title — i.e.
     # upload route (form-supplied). On DOI route the title is "(deferred —
@@ -1550,6 +1607,24 @@ async def api_approve_record(request: Request):
         raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@app.get("/api/newsletter/unsubscribe")
+async def api_newsletter_unsubscribe(request: Request):
+    """One click from a newsletter's footer: `?t=<token>` from
+    newsletter.unsubscribe_token (HMAC over the address, so a link cannot be
+    forged for someone else). Records the event and says so; no login. The
+    public route on icsacinstitute.org is the site's proxy, to be added when
+    the first newsletter goes out (no sends exist yet, 2026-09-30)."""
+    from . import newsletter  # local
+    token = (request.query_params.get("t") or "").strip()
+    email = newsletter.email_from_token(HMAC_SECRET, token) if HMAC_SECRET else None
+    if not email:
+        raise HTTPException(404, "This unsubscribe link is not valid.")
+    if newsletter.is_subscribed(SUBMISSIONS_ROOT, email):
+        newsletter.unsubscribe(SUBMISSIONS_ROOT, email=email, via="link")
+        _audit_append({"event": "newsletter_unsubscribed", "via": "link"})
+    return JSONResponse({"ok": True, "message": "You are unsubscribed from the ICSAC / Persistence newsletter."})
 
 
 @app.get("/api/ebook-verify")

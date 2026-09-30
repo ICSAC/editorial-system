@@ -139,6 +139,15 @@ OPENROUTER_MODELS = [
         "or|google/gemma-4-26b-a4b-it:free",
     ],
 ]
+
+# One-off PAID OpenRouter run: a comma list of OpenRouter model ids
+# in ICSAC_OR_PAID_MODELS puts "or|<model>" (no :free) at the HEAD of each slot,
+# in order, and at the head of the misattribution chain, for THIS process only.
+# A hand-run switch, never set in a unit file or the env file.
+OR_PAID_MODELS = [m.strip() for m in os.environ.get("ICSAC_OR_PAID_MODELS", "").split(",") if m.strip()]
+if OR_PAID_MODELS:
+    for _i, _model in enumerate(OR_PAID_MODELS[:len(OPENROUTER_MODELS)]):
+        OPENROUTER_MODELS[_i].insert(0, f"or|{_model}")
 OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 
 # OpenAI-compatible direct providers for `oai|<provider>|<model>` panel entries
@@ -295,6 +304,16 @@ RUBRIC_DIMENSIONS = [
     "novelty_signal",
     "ai_provenance_signal",
 ]
+
+# Code package digest for the panel (2026-09-30, code_digest.py): the author's
+# declared Zenodo/GitHub archive is fetched READ-ONLY into memory, never
+# executed, capped, and its file list + definitions + the lines defining the
+# paper's named constructs go into the prompt. ICSAC_CODE_DIGEST=0 turns the
+# fetch off (the prompt then says "(none)" and the panel treats code claims as
+# unverified).
+CODE_DIGEST_ENABLED = os.environ.get("ICSAC_CODE_DIGEST", "1") != "0"
+CODE_DIGEST_MAX_BYTES = int(os.environ.get("ICSAC_CODE_DIGEST_MAX_BYTES", str(25 * 1024 * 1024)))
+CODE_DIGEST_MAX_CHARS = int(os.environ.get("ICSAC_CODE_DIGEST_MAX_CHARS", "14000"))
 
 # Path to the institute's website repo (used by publications.py to commit
 # accepted-paper landing pages + redacted reviews). Empty disables the

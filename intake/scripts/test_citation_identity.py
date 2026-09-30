@@ -65,6 +65,9 @@ try:
         "10.0000/lfp.1987.381": {"resolver": "crossref", "resolved_id": "10.0000/lfp.1987.381",
                                        "title": "Self-similar ripples: An explanation of the 1/\n <i>k</i>\n spectrum",
                                        "abstract": "", "year": 1987, "authors": ["Per Holm", "Chao Lin", "Kurt Weber"]},
+        "10.0000/rdc.2026.1629": {"resolver": "crossref", "resolved_id": "10.0000/rdc.2026.1629",
+                                             "title": "Guia de campo das aves do estuário: um estudo de observação",
+                                             "abstract": "", "year": 2026, "authors": ["Alexandre Ferreira", "Antonio Lund"]},
         "10.0000/jcm.1961.183": {"resolver": "crossref", "resolved_id": "10.0000/jcm.1961.183",
                                "title": "Heat and Order in Clockwork Mechanisms",
                                "abstract": "", "year": 1961, "authors": ["R. Lorimer"]},
@@ -176,6 +179,13 @@ try:
                "title": None, "doi": "10.0000/jcm.1961.183", "arxiv_id": None, "type": "doi", "claim_context": ""}
     v = cv.verify_citation(dict(notitle))
     check(v["verified"] and v["doi_identity"] == "confirmed" and "no cited title" in v["reason"], "no cited title: authors + year confirm the DOI")
+    jae = {"raw": "Ferreira, A. A., & Lund, A. P. (2026). A field guide to estuary birds: An observation study. Revista de Campo, 14(42).",
+           "authors": ["A. A. Ferreira", "A. P. Lund"], "year": 2026,
+           "title": "A field guide to estuary birds: An observation study",
+           "doi": "10.0000/rdc.2026.1629", "arxiv_id": None, "type": "doi", "claim_context": ""}
+    v = cv.verify_citation(dict(jae))
+    check(v["verified"] and v["doi_identity"] == "confirmed" and v.get("title_variant") is True
+          and "translated or variant" in v["reason"], "translated title, same authors + year: confirmed as a variant, not a mismatch")
     wrongyear = dict(notitle, year=1999, authors=["Q. Nobody"])
     v = cv.verify_citation(dict(wrongyear))
     check(v["verified"] is False and v["doi_identity"] == "mismatch", "no cited title, wrong authors and year: mismatch")
@@ -191,7 +201,7 @@ try:
 
     # ── the report ───────────────────────────────────────────────────
     print("[7] report")
-    rep_in = cv.verify_all([dict(vac), dict(mal), dict(yag), dict(bra), dict(zen), dict(and_)])
+    rep_in = cv.verify_all([dict(vac), dict(mal), dict(yag), dict(bra), dict(zen), dict(and_), dict(jae)])
     rep = cv.build_verification_report(rep_in)
     check("ground truth" not in rep, "the report no longer calls itself ground truth")
     check("### Confirmed by identifier" in rep and "### Cited DOI disagrees" in rep, "sections present")
@@ -201,6 +211,7 @@ try:
     check("— REAL." not in rep, "no line says REAL any more")
     check("A. Author et al. 2025b** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines")
     check("MATCHED" in rep and "existence check" in rep, "the fuzzy evidence level is explained")
+    check("Ferreira and Lund 2026** — CONFIRMED" in rep and "translated or variant title" in rep, "the variant title is shown on the confirmed line")
     cv.save_citation_report("ICSAC-SUB-TEST-1", rep_in, rep)
     import review
     line = review._citation_header_line("ICSAC-SUB-TEST-1")
