@@ -337,8 +337,16 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   code_link_claims: list[str] | None = None,
                   preprint_doi: str = "",
                   exclusivity_confirmed: bool = False,
+                  curator_findings: str = "",
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
+
+    `curator_findings` is the curation team's own list of what the revision
+    must address (markdown), written by the curator, for the revise letter.
+    It stands whatever the panel recommended: the letter no longer claims
+    "the panel found issues" (false whenever the panel
+    recommended and the curator decided otherwise). Empty renders a loud bracket so
+    the draft cannot go out without it.
 
     verdict ∈ {accept, revise, scope_reject}; source ∈ {doi, upload}. Per-source
     template variants live in templates/submission_<verdict>_<source>.md.
@@ -478,6 +486,10 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
             "> (the availability statement in your manuscript)"),
         "citation_line": citation_line or (
             "Your reference list was resolved against public registries as part of the review."),
+        "curator_findings": curator_findings.strip() or (
+            "[CURATION TEAM FINDINGS - list, in your own words, what the revision must address "
+            "(one numbered point per finding; name sections, theorems and references). "
+            "The panel report is attached; this list is the decision. Delete this bracket.]"),
     })
 
     attachments: list[tuple[str, bytes]] = []
