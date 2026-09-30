@@ -18,7 +18,9 @@ The attached report carries the reviewer panel's scores and comments. The curati
 
 ## Next steps
 
-Revise the manuscript to address the findings above and any panel concerns you agree with, and resubmit through the same intake form at [icsacinstitute.org/submit](https://icsacinstitute.org/submit). In your resubmission's abstract or a cover note in the abstract field, briefly indicate which points were addressed and how — this helps the next review calibrate against the revision history.
+Revise the manuscript and submit the new version through the same form at [icsacinstitute.org/submit](https://icsacinstitute.org/submit). It gets a new submission ID, and nothing else is needed from you.
+
+If you think a finding above is mistaken, leave the paper as it was on that point and say so in an email to [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with this submission ID in the subject line. The curation team reads every such message, and a finding we got wrong is withdrawn.
 
 Resubmissions are evaluated by a fresh panel run; reviewer identities are not preserved across rounds, and there is no implicit credit for the original review. Each pass is independent.
 
