@@ -337,6 +337,10 @@ def _build_review_data(sub_id: str, sub_dir: Path) -> dict:
             "code_data": submission.get("code_data") or {},
             "related_identifiers": submission.get("related_identifiers") or [],
         },
+        # A revised version: the previous ID and the author's note on what changed
+        # and what they dispute (2026-09-30). The panel reads the note inside the
+        # submission block; the curator sees it in the escalation.
+        "resubmission": submission.get("resubmission") or None,
         "raw_metadata": {
             "submission": {
                 "sub_id": sub_id,
@@ -504,12 +508,24 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
             rqc_flag = match.group(1)
 
     fingerprint = "icsacsub" + hashlib.sha1(sub_id.encode()).hexdigest()[:10]
+    resub = review_data.get("resubmission") or {}
+    resub_block = ""
+    if resub:
+        prev = resub.get("of") or "(no ID given)"
+        found = (f"previous decision {resub.get('previous_decision')}" if resub.get("previous_found")
+                 else "previous ID NOT FOUND on disk")
+        note = (resub.get("response") or "").strip()
+        resub_block = (f"REVISED VERSION of {prev} ({found}). Compare against that paper's "
+                       f"curator_findings.md before deciding.\n"
+                       + (f"Author's note ({len(note)} chars): {note[:600]}{'…' if len(note) > 600 else ''}\n\n"
+                          if note else "No author note.\n\n"))
     precheck_note = aggregate.get("precheck_note")
     if precheck_note:
         initial_msg = (
             f"ICSAC submission — needs your call.\n\n"
             f"ID: {sub_id}\n"
             f"Title: {title[:200]}\n"
+            f"{resub_block}"
             f"Recommendation: {rec} (the panel did not run)\n\n"
             f"{precheck_note}\n\n"
             f"Your call: revise (the email asks for the link)\n"
@@ -523,6 +539,7 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
             f"ICSAC submission — needs your call.\n\n"
             f"ID: {sub_id}\n"
             f"Title: {title[:200]}\n"
+            f"{resub_block}"
             f"Panel recommendation: {rec}\n"
             f"Aggregate score: {avg if avg is not None else '(n/a)'}\n"
             f"Disagreement: {'yes' if aggregate.get('disagreement', False) else 'no'}\n"
