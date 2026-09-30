@@ -211,7 +211,7 @@ try:
     check("— REAL." not in rep, "no line says REAL any more")
     check("A. Author et al. 2025b** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines")
     check("MATCHED" in rep and "existence check" in rep, "the fuzzy evidence level is explained")
-    check("Ferreira and Lund 2026** — CONFIRMED" in rep and "translated or variant title" in rep, "the variant title is shown on the confirmed line")
+    check(re.search(r"Ferreira[^\n]*— CONFIRMED\.[^\n]*translated or variant title", rep) is not None, "the variant title is shown on the confirmed line")
     cv.save_citation_report("ICSAC-SUB-TEST-1", rep_in, rep)
     import review
     line = review._citation_header_line("ICSAC-SUB-TEST-1")
