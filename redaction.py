@@ -6,7 +6,10 @@ emits a sanitized version that is safe to publish on icsacinstitute.org.
 The redaction removes all vendor/model identifiers, renames reviewers
 generically ("Reviewer 1", "Reviewer 2", ...), drops internal workflow
 detail (raw API error payloads, slot indices, fallback chains), and
-replaces the disagreement flag with a human-readable consensus label.
+replaces the disagreement flag with a consensus label computed from the
+reviewers' recommendations (unanimous / majority / split; before 2026-10-01
+'strong consensus' / 'mixed' / 'divided' from the score spread), and states
+the score spread separately.
 
 A grep-gate (``assert_clean``) fails hard if any forbidden token survives
 redacting. Callers must catch the exception and abort publication.
@@ -428,18 +431,64 @@ def parse_review_file(path: str) -> ParsedReview:
     )
 
 
+_REC_WORDS = {
+    "RECOMMEND": "recommend",
+    "REVISE_AND_RESUBMIT": "revise and resubmit",
+    "REVIEW_FURTHER": "review further",
+    "REJECT": "decline",
+}
+
+
 def _consensus_label(parsed: ParsedReview) -> str:
-    """Translate disagreement + score spread into reader-friendly label."""
-    max_spread = 0
-    for _, _, scores in parsed.dimension_rows:
-        nums = [float(s) for s in scores if re.match(r"^\d+(\.\d+)?$", s)]
-        if len(nums) >= 2:
-            max_spread = max(max_spread, max(nums) - min(nums))
-    if not parsed.disagreement and max_spread <= 1:
-        return "strong consensus"
-    if max_spread >= 2:
-        return "divided"
-    return "mixed"
+    """The panel's agreement on the RECOMMENDATION, from the reviewers' own
+    recommendations: unanimous / majority / split. This label used to be
+    computed from the score spread alone, so a unanimous recommendation could
+    read "divided" whenever one dimension's scores were spread out (caught
+    by the curator on a decision PDF). Score spread is now its own clause."""
+    recs = [r.get("recommendation") for r in parsed.reviewers
+            if not r.get("error") and r.get("recommendation") and r.get("recommendation") != "N/A"]
+    if not recs:
+        return "split" if parsed.disagreement else "unanimous"
+    top = max(set(recs), key=recs.count)
+    n = recs.count(top)
+    if n == len(recs):
+        return "unanimous"
+    if n * 3 >= len(recs) * 2:
+        return "majority"
+    return "split"
+
+
+def _consensus_sentence(parsed: ParsedReview, consensus: str) -> str:
+    """'The panel's recommendation was unanimous: revise and resubmit.' plus
+    the score spread, stated as what it is."""
+    recs = [r.get("recommendation") for r in parsed.reviewers
+            if not r.get("error") and r.get("recommendation") and r.get("recommendation") != "N/A"]
+    counts = {}
+    for r in recs:
+        counts[r] = counts.get(r, 0) + 1
+    ordered = sorted(counts.items(), key=lambda kv: -kv[1])
+    if consensus == "unanimous":
+        word = _REC_WORDS.get(parsed.recommendation, parsed.recommendation.lower().replace("_", " "))
+        head = f"The panel's recommendation was **unanimous**: {word}."
+    elif consensus == "majority" and ordered:
+        top, n = ordered[0]
+        head = (f"The panel's recommendation was a **majority** for "
+                f"{_REC_WORDS.get(top, top.lower().replace('_', ' '))} ({n} of {len(recs)}).")
+    else:
+        parts = ", ".join(f"{n} {_REC_WORDS.get(k, k.lower().replace('_', ' '))}" for k, n in ordered)
+        head = f"The panel was **split**: {parts}." if parts else "The panel was **split**."
+    wide = []
+    for label, _, scores in parsed.dimension_rows:
+        nums = [float(x) for x in scores if re.match(r"^\d+(\.\d+)?$", x)]
+        if len(nums) >= 2 and max(nums) - min(nums) >= 2:
+            wide.append((label, int(max(nums) - min(nums))))
+    if wide:
+        top_spread = max(w for _, w in wide)
+        names = ", ".join(l for l, _ in wide)
+        tail = f" Individual scores ranged by up to {top_spread} points on {names}."
+    else:
+        tail = " Individual scores agreed within a point on every dimension."
+    return head + tail
 
 
 def build_public_markdown(parsed: ParsedReview) -> str:
@@ -463,8 +512,8 @@ def build_public_markdown(parsed: ParsedReview) -> str:
         "",
         (
             f"This submission was evaluated by a panel of {valid_n} independent "
-            f"advanced AI reviewers scoring six dimensions. Panel consensus was "
-            f"**{consensus}**."
+            f"advanced AI reviewers scoring six dimensions. "
+            + _consensus_sentence(parsed, consensus)
         ),
         "",
         "### Aggregate scores",
