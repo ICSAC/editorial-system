@@ -73,7 +73,7 @@ _NAME_PARTICLES = {"de", "da", "di", "del", "della", "van", "von", "der", "den",
 
 
 def _salutation_name(name: str) -> str:
-    """'[author] [author]' -> '[author] [author]', 'ada lovelace' -> 'Ada Lovelace':
+    """'Grace HOPPER' -> 'Grace Hopper', 'ada lovelace' -> 'Ada Lovelace':
     forms arrive with surnames in capitals (2026-09-28) or typed all in lower
     case (2026-09-30); the salutation should read as a name. A token already in
     mixed case is left alone; lower-case particles (de, van, ...) stay lower

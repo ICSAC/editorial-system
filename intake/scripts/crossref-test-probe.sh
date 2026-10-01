@@ -19,7 +19,7 @@ body=$(printf 'url = "https://test.crossref.org/servlet/login?usr=%s/%s&pwd=%s"\
 code=$(echo "$body" | tail -1)
 if [ "$code" = "200" ] && ! echo "$body" | grep -qi "wrong credentials"; then
   echo "$(date -u +%FT%TZ) GREEN"
-  ping "Crossref TEST now accepts the password (HTTP 200). Next: cd ~/Desktop/icsac/editorial-system && intake/register-doi.sh <sub-id>   (TEST deposit, nothing public). If that reads Success, --live is yours when you decide."
+  ping "Crossref TEST now accepts the password (HTTP 200). Next: cd ~/Desktop/icsac/editorial-system && intake/register-doi.sh <sub_id>   (TEST deposit, nothing public). If that reads Success, --live is yours when you decide."
   date -u +%FT%TZ > "$DONE"; exit 0
 fi
 echo "$(date -u +%FT%TZ) still $code"

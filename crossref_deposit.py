@@ -218,7 +218,7 @@ LICENSE_LABELS = {
 
 
 def display_name(full: str) -> str:
-    """'[author] [author]' / '[author], [author]' / '[author] [author]' -> '[author] [author]'."""
+    """'LOVELACE Ada' / 'Lovelace, Ada' / 'Ada Lovelace' -> 'Ada Lovelace'."""
     if "," in (full or ""):
         last, _, first = full.partition(",")
         given, surname = first.strip(), last.strip()
@@ -231,7 +231,7 @@ def display_name(full: str) -> str:
 
 def split_name(full: str) -> tuple[str, str]:
     """(given, surname). An ALL-CAPS token marks the surname (French/EU form
-    '[author] [author]'); otherwise the last token. Surname is title-cased
+    'Ada LOVELACE'); otherwise the last token. Surname is title-cased
     when it arrived in caps so the record reads as prose, not as a form."""
     if "," in (full or ""):
         last, _, first = full.partition(",")
@@ -245,8 +245,8 @@ def split_name(full: str) -> tuple[str, str]:
         return len(core) > 1 and core.isalpha() and core.isupper() and "." not in t
     caps = [t for t in toks if _is_caps(t)]
     if caps:
-        # ALL-CAPS tokens are the surname wherever they sit ("[author] [author]",
-        # "[author] [author]", "DE LA CRUZ Maria"); the rest is the given name.
+        # ALL-CAPS tokens are the surname wherever they sit ("LOVELACE Ada",
+        # "Ada LOVELACE", "DE LA CRUZ Maria"); the rest is the given name.
         surname = " ".join(t.title() for t in caps)
         given = " ".join(t for t in toks if not _is_caps(t))
     else:
