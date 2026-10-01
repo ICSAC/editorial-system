@@ -319,6 +319,43 @@ def _attachments_block(sub_id: str, panel_report_md: str, rqc_md: str) -> str:
     return head + "\n\n" + "\n".join(lines)
 
 
+def _compaction_lead(manifest: dict) -> str:
+    """The disclosure's first sentences, built from what the manifest shows was
+    removed, item by item (audit 2026-10-01 S1: a letter said the references
+    list was removed when its start marker had not matched and nothing was).
+    Says what stayed visible to the panel; never claims a removal that did
+    not happen."""
+    removed = []
+    if manifest.get("author_names"):
+        removed.append("author names")
+    if manifest.get("affiliations"):
+        removed.append("affiliations")
+    if manifest.get("emails"):
+        removed.append("contact information")
+    if manifest.get("orcids"):
+        removed.append("ORCID iDs")
+    if manifest.get("acknowledgments_text"):
+        removed.append("the acknowledgments")
+    if manifest.get("funding_statements"):
+        removed.append("funding statements")
+    refs_removed = bool(manifest.get("references_count") or manifest.get("references_section_chars"))
+    if refs_removed:
+        removed.append("the references list (inline citation markers were preserved)")
+    if removed:
+        listed = removed[0] if len(removed) == 1 else ", ".join(removed[:-1]) + " and " + removed[-1]
+        lead = ("Before our AI panel reviewed your manuscript, the editorial system "
+                f"automatically removed {listed}. ")
+    else:
+        lead = ("Before our AI panel reviewed your manuscript, the editorial system ran "
+                "its blind-review preprocessing, which found nothing to remove. ")
+    if not any(manifest.get(k) for k in ("author_names", "affiliations", "emails", "orcids")):
+        lead += "Author details in the text stayed visible to the panel. "
+    if not refs_removed:
+        lead += ("The references list was not removed, so the panel saw it, including any "
+                 "citations of your own work. ")
+    return lead
+
+
 def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   verdict: str, source: str,
                   panel_report_md: str,
@@ -395,13 +432,15 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         compaction_manifest = {"_failure": "no manifest provided to send_decision"}
     failure = compaction_manifest.get("_failure")
     if failure:
+        # The failure reason stays internal (it names the tool that failed);
+        # the curator sees it in the escalation (audit 2026-10-01 N5).
         disclosure = (
             "ICSAC normally runs every submission through an automated "
             "blind-review preprocessor that strips author identifiers, "
             "affiliations, contact information, acknowledgments, funding "
             "statements, and the references list before the panel reads "
             "the manuscript. For your submission this preprocessing did "
-            f"not complete ({failure}), so the manuscript was withheld from "
+            "not complete, so the manuscript was withheld from "
             "the automated panel and the decision rests with the curation "
             "team. If you believe this affected the decision in a way you "
             "want to contest, contact help@icsacinstitute.org and reference "
@@ -409,33 +448,10 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         )
     else:
         manifest_lines = review_compaction.render_manifest(compaction_manifest)
-        # Say what the manifest shows, not what the step is meant to do: a run
-        # that identified no author details left them visible to the panel
-        # (2026-09-28: the first external paper's manifest held only the
-        # reference list).
-        removed_identity = any(compaction_manifest.get(k)
-                               for k in ("author_names", "affiliations", "emails", "orcids"))
-        if removed_identity:
-            lead = (
-                "Before our AI panel reviewed your manuscript, the editorial "
-                "system automatically removed author names, affiliations, "
-                "contact information, ORCID iDs, acknowledgments, funding "
-                "statements, and the references list (inline citation markers "
-                "were preserved). ")
-        else:
-            lead = (
-                "Before our AI panel reviewed your manuscript, the editorial "
-                "system ran its blind-review preprocessing, which is meant to "
-                "remove author names, affiliations, contact information, ORCID "
-                "iDs, acknowledgments, funding statements, and the references "
-                "list (inline citation markers are preserved). For your "
-                "manuscript it identified and removed only what is listed "
-                "below; author details elsewhere in the text stayed visible to "
-                "the panel. ")
+        lead = _compaction_lead(compaction_manifest)
         disclosure = (
             lead +
-            "This is a standard double-blind preprocessing "
-            "step intended to reduce author-identity bias, lower token "
+            "The step is meant to reduce author-identity bias, lower token "
             "consumption, and add a privacy layer between authors and the "
             "models in the panel. Citation verification was performed "
             "separately against your full reference list upstream of the "

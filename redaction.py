@@ -961,6 +961,22 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         if parsed.flag
         else "Review Quality Control: passed."
     )
+    # Render only the public dimensions this record was scored on: an audit
+    # made before 2026-10-01 has no Evidence Use, and must not show an empty
+    # column under a sentence claiming that check (audit 2026-10-01 P2).
+    valid_slots = [s for s in parsed.slots if not s["errored"]]
+    scored = {lbl for s in valid_slots for lbl, _, _ in s["dimensions"]}
+    dims = [d for d in RQC_PUBLIC_DIMENSIONS if d in scored] or [
+        d for d in RQC_PUBLIC_DIMENSIONS if d != "Evidence Use"]
+    evidence_audited = "Evidence Use" in dims
+    audited_for = (
+        "rubric adherence, internal consistency, specificity, "
+        "institutional voice and use of the verification evidence the "
+        "panel was given (the citation checks and the code package "
+        "digest)" if evidence_audited else
+        "rubric adherence, internal consistency, specificity, and "
+        "institutional voice")
+    n_dims = {4: "four", 5: "five"}.get(len(dims), str(len(dims)))
 
     lines: list[str] = [
         "---",
@@ -977,10 +993,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         "",
         (
             "This audit quality checks each AI reviewer's assessment for "
-            "rubric adherence, internal consistency, specificity, "
-            "institutional voice and use of the verification evidence the "
-            "panel was given (the citation checks and the code package "
-            "digest). It is published alongside the panel review "
+            f"{audited_for}. It is published alongside the panel review "
             "so the quality of the review process is as auditable as the "
             "review itself."
         ),
@@ -1041,22 +1054,21 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     # the open review's reviewer count. Errored slots are operator-layer
     # signal; surfacing them publicly creates a count mismatch with the
     # review section and invites reader confusion.
-    valid_slots = [s for s in parsed.slots if not s["errored"]]
 
     lines.extend(["### Reviewer Quality Control Audit", ""])
 
     # Condensed table: reviewer × four scholarly dimensions.
     lines.append(
-        "| Reviewer | " + " | ".join(RQC_PUBLIC_DIMENSIONS) + " |"
+        "| Reviewer | " + " | ".join(dims) + " |"
     )
     lines.append(
-        "|----------|" + "|".join(["----"] * len(RQC_PUBLIC_DIMENSIONS)) + "|"
+        "|----------|" + "|".join(["----"] * len(dims)) + "|"
     )
     for idx, slot in enumerate(valid_slots, start=1):
         label = f"Reviewer {idx}"
         by_label = {lbl: (score, just) for lbl, score, just in slot["dimensions"]}
         cells = [label]
-        for dim in RQC_PUBLIC_DIMENSIONS:
+        for dim in dims:
             score, _ = by_label.get(dim, ("—", ""))
             cells.append(score)
         lines.append("| " + " | ".join(cells) + " |")
@@ -1073,7 +1085,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         lines.append(f'<summary><strong>{label}</strong></summary>')
         lines.append("")
         lines.append("<ul>")
-        for dim in RQC_PUBLIC_DIMENSIONS:
+        for dim in dims:
             score, just = by_label.get(dim, ("—", ""))
             if just:
                 just, ev = screen_self_identification(just, f"RQC {label} {dim}")
@@ -1094,7 +1106,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         "",
         (
             "*Review Quality Control is an internal ICSAC audit of the "
-            "panel review itself. The four dimensions above are published "
+            f"panel review itself. The {n_dims} dimensions above are published "
             "as part of ICSAC's open review commitment.*"
         ),
         "",
