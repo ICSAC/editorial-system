@@ -153,7 +153,7 @@ def _load_reviews(reviews_dir: str) -> list[dict]:
                 "recommendation": fm.get("recommendation", "REVIEW_FURTHER"),
                 # Published copies carry "consensus: divided" instead.
                 "disagreement": (fm["disagreement"].lower() == "true") if "disagreement" in fm
-                                else fm.get("consensus", "").lower() == "divided",
+                                else fm.get("consensus", "").lower() in ("divided", "split"),
                 "review_date": _parse_review_date(fm.get("review_date", "")),
                 "dimension_means": means,
                 "rqc_flag": rqc_flags.get(rid),
