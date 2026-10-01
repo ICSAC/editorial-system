@@ -9,7 +9,7 @@ Your manuscript has been accepted for publication by the Institute for Complexit
 **Received:** {{received_date}}
 **Decision:** {{decided_date}} — accepted
 
-{{attachments_sentence}} Your paper was read in two rounds by a panel of independent reviewers (the report lists every pass and its scores), and the panel itself was audited for rubric adherence, consistency, specificity and tone. You are reading the same record we publish.
+{{attachments_sentence}} Your paper was read in two rounds by a panel of independent reviewers (the report lists every pass and its scores), and the panel itself was audited for rubric adherence, consistency, specificity, tone and its use of the verification evidence (the citation checks and the code package digest). You are reading the same record we publish.
 
 {{curator_note}}
 

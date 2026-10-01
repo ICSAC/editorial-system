@@ -9,7 +9,7 @@ Your submission to the Institute for Complexity Science and Advanced Computing h
 
 ## What happens next
 
-Your paper enters the institute's open-review pipeline. A multi-reviewer panel reviews the manuscript against the institute's rubrics across independent passes. A separate Review Quality Control pass then audits the panel itself for rubric adherence, internal consistency, specificity, and tone before any decision is finalized. Every panel run is logged to a tamper-evident audit trail.
+Your paper enters the institute's open-review pipeline. A multi-reviewer panel reviews the manuscript against the institute's rubrics across independent passes. A separate Review Quality Control pass then audits the panel itself for rubric adherence, internal consistency, specificity, tone and its use of the verification evidence before any decision is finalized. Every panel run is logged to a tamper-evident audit trail.
 
 Outcomes are score-driven: **recommend**, **revise and resubmit**, or **scope reject**. Every result goes to the institute's curation team for the final decision.
 

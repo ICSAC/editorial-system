@@ -1887,7 +1887,7 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     try:
         import review_quality_control as rqc_mod
         print("  Running Review Quality Control audit...")
-        rqc_mod.audit_review(review_data, markdown)
+        rqc_mod.audit_review(review_data, markdown, compaction_manifest=compaction_manifest)
     except Exception as e:
         print(f"  RQC audit failed (non-fatal): {e}")
 
