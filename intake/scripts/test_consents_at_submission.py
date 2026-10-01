@@ -228,8 +228,8 @@ try:
           "public state endpoint exposes the chain, ids only, no decision")
     md = review.generate_review_markdown(rd, [[]], {"recommendation": "RECOMMEND", "models_used": ["x"], "disagreement": False,
                                                     "dimension_scores": {}, "passes": 1})
-    check(f"revision_of: {prev_id}" in md and f"**Revision of:** {prev_id} (previous decision: accept)" in md,
-          "the review report's front matter and header carry the revision")
+    check(f"revision_of: {prev_id}" in md and f"**Revision of:** {prev_id}  " in md and "previous decision" not in md,
+          "the review report carries the revised id and never the previous decision (earlier rounds are not public)")
     rd0 = worker._build_review_data(sid, subs / "test" / sid)
     md0 = review.generate_review_markdown(rd0, [[]], {"recommendation": "RECOMMEND", "models_used": ["x"], "disagreement": False,
                                                       "dimension_scores": {}, "passes": 1})
