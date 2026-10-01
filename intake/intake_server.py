@@ -442,6 +442,35 @@ RELATION_TYPES = {
 }
 
 
+def _parse_resubmission(form) -> dict | None:
+    """The "Revised version" question (2026-09-30): "Yes" reveals one field, the
+    previous submission ID. A returned paper comes back through the regular
+    flow and gets a new ID; this links the two for the curator. The ID must
+    look like one of ours; whether that paper exists and what was decided is
+    looked up for the curator, never enforced. Nothing here reaches the panel
+    or the public record."""
+    answer = (str(form.get("revised_version") or "")).strip().lower()
+    of = (str(form.get("resubmission_of") or "")).strip().upper()
+    if answer not in ("yes", "true", "1") and not of:
+        return None
+    if not of:
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": ["a revised version needs the previous submission ID"]})
+    if not (SUB_ID_RE.match(of) or TEST_SUB_ID_RE.match(of)):
+        raise HTTPException(400, {"error": "validation_failed",
+                                  "details": ["previous submission ID must look like ICSAC-SUB-00000"]})
+    previous_found, previous_decision = False, None
+    root = TEST_SUBMISSIONS_ROOT if TEST_SUB_ID_RE.match(of) else SUBMISSIONS_ROOT
+    st = root / of / "state.json"
+    if st.exists():
+        previous_found = True
+        try:
+            previous_decision = json.loads(st.read_text()).get("decision")
+        except Exception:
+            previous_decision = None
+    return {"of": of, "previous_found": previous_found, "previous_decision": previous_decision}
+
+
 def _parse_code_data(available_raw, url_raw) -> dict:
     """The form's code and data question (2026-09-28): does the paper say code
     or data is available, and if so, where. ICSAC links to it and never hosts
@@ -789,7 +818,7 @@ def handle_test_submission(submitter: dict, auth_orcid: str,
 
 async def handle_test_pipeline_submission(
     *, tier: int, request: Request, form, submitter: dict,
-    auth_orcid: str, auth_name: str, code_data: dict | None = None,
+    auth_orcid: str, auth_name: str, code_data: dict | None = None, resubmission: dict | None = None,
 ) -> JSONResponse:
     """T2/T3 entry point: real pipeline, test side-effect routing.
 
@@ -966,6 +995,7 @@ async def handle_test_pipeline_submission(
         "preprint_doi": preprint["doi"] if preprint else None,
         "article_license": article_license,
         "preprint_meta": preprint or doi_route_meta,
+        "resubmission": resubmission,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
@@ -1160,6 +1190,7 @@ async def api_submit(request: Request):
         "exclusions": form.get("exclusions"),
     })
     code_data = _parse_code_data(form.get("code_data_available"), form.get("code_data_url"))
+    resubmission = _parse_resubmission(form)
 
     # Verified-identity headers from the CF Pages auth gate. We need these
     # early so the test-mode short-circuit can fire BEFORE any counter
@@ -1219,6 +1250,7 @@ async def api_submit(request: Request):
         return await handle_test_pipeline_submission(
             tier=tier, request=request, form=form, submitter=submitter,
             auth_orcid=auth_orcid, auth_name=auth_name, code_data=code_data,
+            resubmission=resubmission,
         )
 
     pdf = form.get("pdf")
@@ -1386,6 +1418,7 @@ async def api_submit(request: Request):
         "preprint_doi": preprint["doi"] if preprint else None,
         "article_license": article_license,
         "preprint_meta": preprint or doi_route_meta,
+        "resubmission": resubmission,
         "pdf": {
             "filename": "paper.pdf",
             "size_bytes": pdf_size,
@@ -1461,7 +1494,9 @@ async def api_submit(request: Request):
             f"Title: {title[:120]}\n"
             f"Submitter: {submitter['name']} <{submitter['email']}>\n"
             f"License: {license_id or '(from DOI)'}\n"
-            f"Status: queued for panel review",
+            + (f"Revised version of: {resubmission['of'] or '(no ID given)'}"
+               f" ({'previous decision ' + str(resubmission['previous_decision']) if resubmission['previous_found'] else 'previous ID NOT FOUND'})\n" if resubmission else "")
+            + f"Status: queued for panel review",
             parse_mode=None,
         )
     except Exception:

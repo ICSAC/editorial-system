@@ -18,7 +18,7 @@ The attached report carries the reviewer panel's scores and comments. The curati
 
 ## Next steps
 
-Revise the manuscript and submit the new version through the same form at [icsacinstitute.org/submit](https://icsacinstitute.org/submit). It gets a new submission ID, and nothing else is needed from you.
+Revise the manuscript and submit the new version through the same form at [icsacinstitute.org/submit](https://icsacinstitute.org/submit). Answer "Yes" to "Is this a revised version of a paper ICSAC returned?" and give this ID ({{icsac_submission_id}}); the new version gets its own submission ID, and nothing else is needed from you.
 
 If you think a finding above is mistaken, leave the paper as it was on that point and say so in an email to [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with this submission ID in the subject line. The curation team reads every such message, and a finding we got wrong is withdrawn.
 

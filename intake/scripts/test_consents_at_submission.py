@@ -10,7 +10,9 @@ the exclusions at submission (validated ids, stored, pre-ticked on the
 response page, seeded into the state when the window opens, replaced by the
 author's response), the newsletter opt-in (stored on the record, appended to
 the list only on the production path, never on a test tier), the newsletter
-module (fold, unsubscribe, token), and the unsubscribe endpoint.
+module (fold, unsubscribe, token), the unsubscribe endpoint, and the
+revised-version question (previous ID only, stored, named in the curator
+escalation, kept out of the panel; the revise letters point at it).
 """
 from __future__ import annotations
 
@@ -175,6 +177,48 @@ try:
     r = client.get("/api/newsletter/unsubscribe", params={"t": "nonsense"})
     check(r.status_code == 404, f"bad token -> 404 ({r.status_code})")
     check(all(e.get("event") != "newsletter_subscribed" for e in audit), "no production subscribe event from T2 posts")
+
+
+    print("4. revised version (previous submission ID)")
+    st, resp = submit(**NEW)
+    check(record(resp).get("resubmission") is None, "no answer -> resubmission None")
+    st, resp = submit(**NEW, revised_version="no")
+    check(st in (200, 202) and record(resp).get("resubmission") is None, "answer No -> None")
+    st, resp = submit(**NEW, revised_version="yes", resubmission_of="ICSAC-SUB-NNNNN")
+    r = record(resp).get("resubmission") or {}
+    check(st in (200, 202) and r.get("of") == "ICSAC-SUB-NNNNN" and r.get("previous_found") is False
+          and "response" not in r, f"Yes + ID: upper-cased, stored, no note field ({st})")
+    prev_id = sid  # the exclusions paper from section 2, decided above via aa.record on an 'accept' state
+    st, resp = submit(**NEW, revised_version="yes", resubmission_of=prev_id)
+    r = record(resp).get("resubmission") or {}
+    check(r.get("previous_found") is True and r.get("previous_decision") == "accept", "previous submission found on disk with its decision")
+    resub_id = resp.get("sub_id", "")
+    st, resp = submit(**NEW, revised_version="yes")
+    check(st == 400 and "previous submission ID" in json.dumps(resp), f"Yes without an ID -> 400 ({st})")
+    st, resp = submit(**NEW, revised_version="yes", resubmission_of="SUB-9")
+    check(st == 400 and "ICSAC-SUB-00000" in json.dumps(resp), f"malformed previous ID -> 400 ({st})")
+    st, resp = submit(**NEW, resubmission_of="ICSAC-SUB-NNNNN")
+    check(st in (200, 202) and (record(resp).get("resubmission") or {}).get("of") == "ICSAC-SUB-NNNNN", "an ID alone counts as Yes")
+
+    from intake import submission_worker as worker
+    import review
+    rd = worker._build_review_data(resub_id, subs / "test" / resub_id)
+    check((rd.get("resubmission") or {}).get("of") == prev_id, "worker review_data carries the previous ID")
+    prompt = review.build_prompt(rd)
+    check(prev_id not in prompt and "REVISED VERSION" not in prompt, "the panel prompt carries nothing of it (fresh panel)")
+    sent: list[str] = []
+    worker.notify.send_telegram = lambda msg, *a, **k: (sent.append(msg), 1)[1]
+    worker._write_incident_to_remote = lambda incident: True
+    worker._alert_remote = lambda *a, **k: None
+    worker._escalate_for_decision(resub_id, subs / "test" / resub_id, rd, {"recommendation": "RECOMMEND", "dimension_scores": {}})
+    check(sent and f"REVISED VERSION of {prev_id}" in sent[-1] and "previous decision accept" in sent[-1]
+          and "curator_findings.md" in sent[-1], "curator escalation names the previous paper and its decision")
+    from intake import notify_author as na
+    for tpl in ("submission_revise_upload.md", "submission_revise_doi.md"):
+        raw = (na.TEMPLATES_DIR / tpl).read_text()
+        check("abstract field" not in raw and "revised version of a paper ICSAC returned" in raw and "own submission ID" in raw
+              and "a finding we got wrong is withdrawn" in raw and "help@icsacinstitute.org" in raw,
+              f"{tpl}: the Yes question + this ID, new ID, dispute by email; no cover note in the abstract")
 
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
