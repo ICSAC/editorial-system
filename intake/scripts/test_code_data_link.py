@@ -49,17 +49,17 @@ try:
     print("1. claim check")
     vim_text = ingest.extract_pdf_text(str(PAPER_PDF))
     r = ca.assess({}, vim_text)
-    check(r["missing_link"], "[author]: claims code/data, no link anywhere -> held")
-    check(any("accompanying archive" in c for c in r["claims"]), "[author]: the archive sentence is quoted")
+    check(r["missing_link"], "the paper: claims code/data, no link anywhere -> held")
+    check(any("accompanying archive" in c for c in r["claims"]), "the paper: the archive sentence is quoted")
     link = "https://github.com/example/generator"
     check(not ca.assess({"code_data": {"available": True, "url": link}}, vim_text)["missing_link"],
-          "[author] + form link -> not held")
+          "the paper + form link -> not held")
     check(not ca.assess({"related_identifiers": [{"identifier": link, "relation": "isSupplementedBy"}]},
-                        vim_text)["missing_link"], "[author] + 'is supplemented by' identifier -> not held")
+                        vim_text)["missing_link"], "the paper + 'is supplemented by' identifier -> not held")
     check(not ca.assess({"related_identifiers": [{"identifier": link, "relation": "isSupplementTo"}]},
-                        vim_text)["missing_link"], "[author] + older 'is supplement to' identifier -> not held")
+                        vim_text)["missing_link"], "the paper + older 'is supplement to' identifier -> not held")
     check(ca.assess({"related_identifiers": [{"identifier": link, "relation": "cites"}]},
-                    vim_text)["missing_link"], "[author] + a 'cites' identifier -> still held")
+                    vim_text)["missing_link"], "the paper + a 'cites' identifier -> still held")
 
     na = "Methods.\nWe prove a theorem.\n\nData availability: Not applicable.\n\nReferences\nSmith, J. (2020)."
     check(ca.find_claims(ca.body_text(na)) == [], "'Data availability: Not applicable.' is no claim")

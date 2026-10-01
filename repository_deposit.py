@@ -121,7 +121,7 @@ def _build_metadata(submission: dict, *, external_doi: str | None = None,
             creators.append({"name": c})
             continue
         # Zenodo's canonical creator form is "Family, Given". Authors type names
-        # every which way ("[author] [author]"); normalise once so the archive,
+        # every which way ("LOVELACE Ada"); normalise once so the archive,
         # the Crossref record and the landing page agree on how they are named.
         raw_name = (c.get("name") or "").strip()
         if not raw_name:

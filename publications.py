@@ -253,7 +253,7 @@ def stage_public_review_for_slug(
 
     `review_key` is the prefix redaction.publish_public_review searches
     for under reviews_dir — record_id for Zenodo-watcher-path papers,
-    sub_id (e.g. ICSAC-SUB-NNNNN) for intake-path papers.
+    sub_id (ICSAC-SUB-NNNNN) for intake-path papers.
 
     Returns (review_md_path, rqc_md_path) — either may be None if no
     matching review was found. RedactionLeak from the underlying redaction

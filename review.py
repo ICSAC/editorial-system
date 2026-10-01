@@ -219,7 +219,7 @@ def _creator_display_names(creators) -> list[str]:
     so prompt-rendering and review-markdown-rendering code (which does
     `", ".join(...)`) can't blow up with `TypeError: sequence item 0:
     expected str instance, dict found` — observed 2026-04-27 on the first
-    PDF-route submission ICSAC-SUB-NNNNN.
+    PDF-route submission.
     """
     out = []
     for c in creators or []:
@@ -455,7 +455,7 @@ def run_openrouter_review(prompt: str, slot, capture_path: str = None) -> dict:
     # urllib's `timeout=` is per-blocking-operation, not total elapsed.
     # An OpenRouter edge keeping the connection open with a slow drip of
     # bytes can keep resetting the per-read timer indefinitely — observed
-    # 2026-04-26 on ICSAC-SUB-NNNNN where a qwen3-next-80b slot hung 22+
+    # 2026-04-26 on an April submission where a qwen3-next-80b slot hung 22+
     # minutes past the 180s read timeout. Wrap the whole urlopen in a
     # thread-bounded future so a hard wall-clock cap fires regardless of
     # what the socket layer is doing. The orphaned thread leaks for a
@@ -471,7 +471,7 @@ def run_openrouter_review(prompt: str, slot, capture_path: str = None) -> dict:
     # exit calls shutdown(wait=True), which blocks until the worker thread
     # finishes — so when result() raises TimeoutError the function STILL hangs
     # waiting for the orphan urlopen() to return. Observed 2026-04-27 on
-    # ICSAC-SUB-NNNNN retry: pass-1 slot-4 sat 20+ minutes past the supposed
+    # an April submission's retry: pass-1 slot-4 sat 20+ minutes past the supposed
     # 240s cap because the with-exit blocked. Manual shutdown(wait=False) lets
     # this function return immediately; the orphan thread leaks until process
     # exit (worker is a oneshot, so it cleans up at next start).
@@ -505,7 +505,7 @@ def run_openrouter_review(prompt: str, slot, capture_path: str = None) -> dict:
     # into `reasoning` instead. Without this fall-through the panel
     # treats the slot as an empty failure even though the model did
     # produce a usable JSON object — observed 2026-04-26 on every
-    # ICSAC-SUB-NNNNN panel run, slot 1 chain dies because hy3-preview
+    # panel run of an April submission, slot 1 chain dies because hy3-preview
     # never populates `content`. Same fall-through citation_misattribution
     # already does for the misattribution OR call.
     if not raw:
@@ -858,7 +858,7 @@ VALID_RECOMMENDATIONS = ("RECOMMEND", "REVIEW_FURTHER", "REVISE_AND_RESUBMIT", "
 # low-provenance content. A justification listing two or more of these
 # while scoring AI Provenance Signal at 4 or 5 (i.e. "clean") is the
 # score-justification
-# inversion first caught by RQC on ICSAC-SUB-NNNNN (2026-04-25): a
+# inversion first caught by RQC on an April 2026 submission (2026-04-25): a
 # reviewer documented padded prose, fabricated citations, and circular
 # reasoning, then assigned the dimension a 5. Single-hit matches are
 # tolerated because legitimate justifications can negate a single
@@ -950,7 +950,7 @@ def _validate_review_schema(parsed: dict) -> str | None:
     # Negation-aware: a clean review legitimately names what it didn't
     # find ("no padded prose, no fabricated citations"). Counting those
     # as positive hits trips the validator on substantive RECOMMEND
-    # reviews — observed 2026-04-26 on ICSAC-SUB-NNNNN where claude
+    # reviews — observed 2026-04-26 on an April submission where claude
     # slot 0 was rejected over "padded" + "fabricat" both inside
     # negated phrases, dropping the panel below MIN_REVIEWERS. Skip
     # indicator occurrences preceded by a negator within ~30 chars;
