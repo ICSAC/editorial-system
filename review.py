@@ -1266,9 +1266,11 @@ def generate_review_markdown(review_data: dict, pass_results: list[list[dict]], 
         f"**Recommendation:** {rec}  ",
         f"**Panel Passes:** {n_passes}  ",
         f"**Model Disagreement:** {'Yes' if aggregate.get('disagreement') else 'No'}  ",
-        *([f"**Revision of:** {(review_data.get('resubmission') or {}).get('of')}"
-           + (f" (previous decision: {(review_data.get('resubmission') or {}).get('previous_decision')})"
-              if (review_data.get('resubmission') or {}).get('previous_decision') else "") + "  "]
+        # The id only: this header is published with the accepted round's review
+        # record, and earlier rounds (their reports, findings and decisions) are
+        # never public (the curator, 2026-10-01). The previous decision stays in the
+        # curator escalation.
+        *([f"**Revision of:** {(review_data.get('resubmission') or {}).get('of')}  "]
           if (review_data.get('resubmission') or {}).get('of') else []),
         *([f"**Citations:** {_citation_header_line(review_data.get('record_id'))}"]
           if _citation_header_line(review_data.get('record_id')) else []),
