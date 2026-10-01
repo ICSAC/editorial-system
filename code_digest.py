@@ -32,6 +32,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,6 +50,8 @@ MAX_ARCHIVE_BYTES = int(getattr(config, "CODE_DIGEST_MAX_BYTES", 25 * 1024 * 102
 MAX_MEMBER_BYTES = 400 * 1024        # a source file bigger than this is listed, not read
 MAX_FILES_LISTED = 200
 MAX_SOURCE_FILES_READ = 60
+MAX_FILES_FETCHED = 60               # Zenodo files fetched one by one; the rest are listed only
+FETCH_WALL_SEC = 180                 # and never for longer than this in total
 MAX_DIGEST_CHARS = int(getattr(config, "CODE_DIGEST_MAX_CHARS", 14000))
 README_LINES = 40
 HITS_PER_TERM = 12
@@ -155,17 +158,26 @@ def fetch_zenodo(record_id: str) -> tuple[dict, list[dict]]:
                            cap=4 * 1024 * 1024).decode("utf-8", errors="replace"))
     files = []
     budget = MAX_ARCHIVE_BYTES
+    fetched = 0
+    started = time.monotonic()
     for f in meta.get("files") or []:
         name = f.get("key") or ""
         size = int(f.get("size") or 0)
         url = ((f.get("links") or {}).get("self")) or ""
         row = {"name": name, "size": size, "data": None}
         if url and size <= budget and (_is_archive(name) or _ext(name) in TEXT_EXT):
-            try:
-                row["data"] = _get(url, cap=size + 1)
-                budget -= size
-            except DigestFetchError as e:
-                row["error"] = str(e)
+            # A file-count and wall-time cap as well as the byte budget: a data
+            # record with hundreds of small text files meant hundreds of
+            # sequential requests before the panel (audit 2026-10-01 N6).
+            if fetched >= MAX_FILES_FETCHED or time.monotonic() - started > FETCH_WALL_SEC:
+                row["error"] = "not read (file-count or time cap)"
+            else:
+                fetched += 1
+                try:
+                    row["data"] = _get(url, cap=size + 1)
+                    budget -= size
+                except DigestFetchError as e:
+                    row["error"] = str(e)
         files.append(row)
     return meta, files
 

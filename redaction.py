@@ -468,7 +468,11 @@ def _consensus_sentence(parsed: ParsedReview, consensus: str) -> str:
         counts[r] = counts.get(r, 0) + 1
     ordered = sorted(counts.items(), key=lambda kv: -kv[1])
     if consensus == "unanimous":
-        word = _REC_WORDS.get(parsed.recommendation, parsed.recommendation.lower().replace("_", " "))
+        # The reviewers' shared vote, not the score-threshold aggregate: the
+        # two can differ (audit 2026-10-01 P1: all slots REVIEW_FURTHER with an
+        # aggregate RECOMMEND read "unanimous: recommend").
+        shared = ordered[0][0] if ordered else parsed.recommendation
+        word = _REC_WORDS.get(shared, shared.lower().replace("_", " "))
         head = f"The panel's recommendation was **unanimous**: {word}."
     elif consensus == "majority" and ordered:
         top, n = ordered[0]

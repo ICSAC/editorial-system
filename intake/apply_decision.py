@@ -489,9 +489,15 @@ def main(argv: list[str]) -> int:
     for k in ("author_approval_status", "author_window_deadline"):
         if k in on_disk:
             state[k] = on_disk[k]
+    # The decision time is the FIRST decision's; a forced re-draft of the
+    # letter keeps it and records when it was re-drafted (audit 2026-10-01:
+    # eight re-drafts moved the public "decision made" time each time).
+    first_decided = state_pre.get("completed_at") if state_pre.get("decided_by") == "curator" else None
+    if first_decided:
+        state["redrafted_at"] = _now_iso()
     state.update({
         "state": "completed" if ok else "completed_email_failed",
-        "completed_at": _now_iso(),
+        "completed_at": first_decided or _now_iso(),
         "decision": verdict,
         "decided_by": "curator",
         "decision_note": note or None,
@@ -505,9 +511,11 @@ def main(argv: list[str]) -> int:
         awaiting.unlink()
 
     _audit({
-        "sub_id": sub_id, "event": "decision_emailed",
+        # Decision letters are Gmail DRAFTS; the curator sends them by hand, so
+        # the log records a draft, never a send (audit 2026-10-01 I2).
+        "sub_id": sub_id, "event": "decision_drafted",
         "verdict": verdict, "by": "curator", "note": note or None,
-        "email_sent": ok,
+        "email_drafted": ok, "redraft": bool(first_decided),
     }, test_mode=test_mode)
 
     # DOI lazy-rehydration: replace local paper.pdf with a stub now that
@@ -525,7 +533,7 @@ def main(argv: list[str]) -> int:
         f"ICSAC decision applied\n\n"
         f"ID: {sub_id}\n"
         f"Verdict: {verdict.upper()}\n"
-        f"Author email: {'sent' if ok else 'FAILED — ' + str(info)[:120]}",
+        f"Author email: {'drafted in Gmail (not sent)' if ok else 'FAILED — ' + str(info)[:120]}",
         parse_mode=None,
         **_curator_routing(test_mode, tier),
     )

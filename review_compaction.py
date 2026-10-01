@@ -264,7 +264,33 @@ def blind_aux_text(text: str, manifest: dict) -> str:
                 text = text[:s_idx] + "[withheld]" + text[e_idx:]
     text = _EMAIL_RE.sub("[email withheld]", text)
     text = _ORCID_RE.sub("[orcid withheld]", text)
+    # Surnames alone (audit 2026-10-01 N3): self-citations re-identified the
+    # authors ("Smith and Smith 2025" in the citation report, "[Smith 2024]"
+    # in the text) after the full names were gone. Capitalised and upper-case
+    # whole words only, so ordinary lower-case words are left alone.
+    for s in author_surnames(manifest):
+        for form in {s, s.upper()}:
+            text = re.sub(r"(?<![\w-])" + re.escape(form) + r"(?![\w-])", "[author]", text)
     return text
+
+
+_SURNAME_STOP = {"in", "on", "at", "as", "or", "to", "an", "be", "do", "go", "he", "if",
+                 "is", "it", "me", "my", "no", "of", "so", "up", "us", "we", "and", "the"}
+
+
+def author_surnames(manifest: dict) -> list[str]:
+    """Surnames of the manifest's author names: 'Ada Lovelace' -> Lovelace,
+    'Lovelace, Ada' -> Lovelace. Two letters or more, never a stop word."""
+    out: list[str] = []
+    for n in manifest.get("author_names") or []:
+        if not isinstance(n, str) or not n.strip():
+            continue
+        n = n.strip()
+        s = n.split(",")[0].strip() if "," in n else n.split()[-1]
+        s = s.strip(".;:()[]\"'")
+        if len(s) >= 2 and s.lower() not in _SURNAME_STOP and s not in out:
+            out.append(s)
+    return out
 
 
 def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
@@ -521,11 +547,12 @@ def render_manifest(manifest: dict) -> str:
 PANEL_NOTICE_TEMPLATE = """[BLIND REVIEW PREPROCESSING NOTICE]
 
 Author identifying information (names, affiliations, contact details, ORCID
-iDs), the acknowledgments section, funding statements, and the references
-list have been removed from this manuscript before review. This is a
-standard double-blind preprocessing step intended to keep the panel's
-judgment focused on the substance of the work and free from author
-identity bias.
+iDs), the acknowledgments section, funding statements, and, where it could be
+located, the references list have been removed from this manuscript before
+review. Where the authors' surnames appeared in the text (for example in
+citations of their own work) they read [author]. This preprocessing is
+intended to keep the panel's judgment focused on the substance of the work
+and free from author identity bias.
 
 Inline citation markers in the body (e.g. [Smith 2024], [1]) are preserved
 unchanged. Citation verification against the full reference list was

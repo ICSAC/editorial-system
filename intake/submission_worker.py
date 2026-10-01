@@ -513,8 +513,13 @@ def _escalate_for_decision(sub_id: str, sub_dir: Path,
         prev = resub.get("of") or "(no ID given)"
         found = (f"previous decision {resub.get('previous_decision')}" if resub.get("previous_found")
                  else "previous ID NOT FOUND on disk")
-        resub_block = (f"REVISED VERSION of {prev} ({found}). Compare against that paper's "
-                       f"curator_findings.md before deciding.\n\n")
+        if resub.get("owner_match"):
+            resub_block = (f"REVISED VERSION of {prev} ({found}). Compare against that paper's "
+                           f"curator_findings.md before deciding.\n\n")
+        else:
+            resub_block = (f"CLAIMED revised version of {prev} ({found}), NOT LINKED: not submitted "
+                           f"under the same verified ORCID as that paper. Check before treating it "
+                           f"as a revision.\n\n")
     precheck_note = aggregate.get("precheck_note")
     if precheck_note:
         initial_msg = (

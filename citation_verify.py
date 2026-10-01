@@ -438,6 +438,35 @@ def _fetch_datacite(doi: str) -> dict | None:
     }
 
 
+def _doi_handle_status(doi: str) -> str | None:
+    """doi.org's own answer for a DOI: 'registered', 'unregistered', or None
+    when doi.org could not be asked. The handle server knows every DOI from
+    every registration agency (JaLC, mEDRA, KISTI, CNKI ... as well as
+    Crossref and DataCite), so it alone can say a DOI does not exist
+    (audit 2026-10-01 N2: a JaLC and an mEDRA DOI read 'dead')."""
+    import urllib.request as _ur, urllib.error as _ue
+    url = f"https://doi.org/api/handles/{urllib.parse.quote(doi, safe='/')}"
+    req = _ur.Request(url, headers={"User-Agent": CITATION_USER_AGENT, "Accept": "application/json"})
+    try:
+        with _ur.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except _ue.HTTPError as e:
+        if e.code != 404:
+            return None
+        try:
+            data = json.loads(e.read().decode("utf-8", errors="replace"))
+        except Exception:
+            return "unregistered"
+    except (_ue.URLError, TimeoutError, OSError, ValueError):
+        return None
+    code = data.get("responseCode") if isinstance(data, dict) else None
+    if code in (1, 200):
+        return "registered"
+    if code == 100:
+        return "unregistered"
+    return None
+
+
 def _resolve_doi_identity(c: dict) -> dict:
     """Judge a citation by the DOI it carries. Returns
     {"status": "confirmed"|"mismatch"|"dead", "record": <resolver dict>|None,
@@ -449,14 +478,26 @@ def _resolve_doi_identity(c: dict) -> dict:
     mismatch:  the DOI resolves to a record whose title (and, when there is
                no title to compare, whose authors or year) disagrees with the
                citation. The DOI belongs to another work.
-    dead:      neither Crossref nor DataCite has the DOI.
+    dead:      doi.org itself has no such DOI.
+    unchecked: neither Crossref nor DataCite returned metadata, and doi.org
+               either knows the DOI (another registration agency) or could
+               not be asked. Not a finding: the identity was not compared.
     """
     doi = (c.get("doi") or "").strip()
     rec = _fetch_crossref(doi) or _fetch_datacite(doi)
     if not rec:
-        return {"status": "dead", "record": None, "title_ok": None, "authors_ok": None,
-                "year_ok": None,
-                "reason": f"Cited DOI {doi} does not resolve on Crossref or DataCite."}
+        handle = _doi_handle_status(doi)
+        empty = {"record": None, "title_ok": None, "authors_ok": None, "year_ok": None}
+        if handle == "unregistered":
+            return {"status": "dead", **empty,
+                    "reason": f"Cited DOI {doi} does not exist at doi.org."}
+        if handle == "registered":
+            return {"status": "unchecked", **empty,
+                    "reason": (f"Cited DOI {doi} is registered at doi.org, but neither Crossref nor "
+                               f"DataCite returned its metadata, so its identity was not compared.")}
+        return {"status": "unchecked", **empty,
+                "reason": (f"Cited DOI {doi} could not be checked: Crossref, DataCite and doi.org "
+                           f"did not answer.")}
     cited_title = (c.get("title") or "").strip()
     authors = c.get("authors") or []
     authors_ok = _author_overlap(authors, rec.get("authors") or []) if authors else None
@@ -726,7 +767,12 @@ def verify_citation(c: dict) -> dict:
         out["doi_identity"] = doi_verdict["status"]
         out["doi_identity_reason"] = doi_verdict["reason"]
         r = doi_verdict.get("record")
-        if doi_verdict["status"] == "confirmed":
+        if doi_verdict["status"] == "unchecked":
+            # Not a finding either way: fall through to the text searches,
+            # which can still establish that the work exists.
+            out["reason"] = doi_verdict["reason"]
+            r = None
+        elif doi_verdict["status"] == "confirmed":
             out.update({
                 "verified": True,
                 "resolver": r["resolver"],
@@ -739,22 +785,23 @@ def verify_citation(c: dict) -> dict:
             if doi_verdict.get("title_variant"):
                 out["title_variant"] = True
             return out
-        if r:
-            # mismatch: keep what the DOI points at, so the report can show it
-            out["resolved_id"] = r["resolved_id"]
-            out["resolved_title"] = r["title"]
-            out["resolved_year"] = r.get("year")
-        out["confidence"] = "doi-dead" if doi_verdict["status"] == "dead" else "doi-mismatch"
-        out["reason"] = doi_verdict["reason"]
-        suggestion = _find_probable_record(c)
-        if suggestion:
-            out["suggested_id"] = suggestion["resolved_id"]
-            out["suggested_title"] = suggestion["title"]
-            out["suggested_year"] = suggestion.get("year")
-            dated = f" ({suggestion['year']})" if suggestion.get("year") else ""
-            out["reason"] += (f" A registry search finds a record matching the cited title: "
-                              f"{suggestion['resolved_id']} — *{suggestion['title']}*{dated}.")
-        return out
+        if doi_verdict["status"] in ("mismatch", "dead"):
+            if r:
+                # mismatch: keep what the DOI points at, so the report can show it
+                out["resolved_id"] = r["resolved_id"]
+                out["resolved_title"] = r["title"]
+                out["resolved_year"] = r.get("year")
+            out["confidence"] = "doi-dead" if doi_verdict["status"] == "dead" else "doi-mismatch"
+            out["reason"] = doi_verdict["reason"]
+            suggestion = _find_probable_record(c)
+            if suggestion:
+                out["suggested_id"] = suggestion["resolved_id"]
+                out["suggested_title"] = suggestion["title"]
+                out["suggested_year"] = suggestion.get("year")
+                dated = f" ({suggestion['year']})" if suggestion.get("year") else ""
+                out["reason"] += (f" A registry search finds a record matching the cited title: "
+                                  f"{suggestion['resolved_id']} — *{suggestion['title']}*{dated}.")
+            return out
 
     # 3. arXiv title+author search (free, well-behaved rate limits, high
     #    signal for arXiv-hosted preprints which dominate our corpus).
@@ -1036,6 +1083,8 @@ def build_verification_report(citations: list[dict]) -> str:
         for c in unverifiable:
             label = _short_label(c)
             reason = c.get("reason") or "no resolver match"
+            if c.get("doi_identity") == "unchecked" and c.get("doi_identity_reason"):
+                reason = c["doi_identity_reason"] + (f" {reason}" if reason != c["doi_identity_reason"] else "")
             lines.append(f"- **{label}** — UNVERIFIABLE. {reason}")
         lines.append("")
         lines.append(
