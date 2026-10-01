@@ -42,7 +42,7 @@ try:
     rdir = tmp / "reviews"; rdir.mkdir()
     cits = {"record_id": rid, "citations": [
         {"authors": ["P. W. Hollis"], "year": 1972, "verified": True, "confidence": "exact-id", "doi_identity": "confirmed"},
-        {"authors": ["G. Varela", "V. Serra"], "year": 2024, "verified": False, "confidence": "doi-mismatch",
+        {"authors": ["A. Nobody", "B. Nobody"], "year": 2024, "verified": False, "confidence": "doi-mismatch",
          "doi_identity": "mismatch", "reason": "DOI 10.1038/x resolves to *A survey of tidal pool ecology*, not to the cited title."},
         {"authors": ["K. G. Moreau"], "year": 2024, "verified": False, "confidence": "doi-dead", "doi_identity": "dead",
          "reason": "Cited DOI 10.0000/inst.2024.126 does not resolve on Crossref or DataCite."},
@@ -52,18 +52,18 @@ try:
     (rdir / f"{rid}_citations.json").write_text(json.dumps(cits))
     (rdir / f"{rid}_code_digest.md").write_text(
         "# Code package digest\n\nFetched read-only.\n\n```\nSource: Zenodo record 1 (declared by the author)\nRecord title: t\n\n"
-        "Files (2):\n  a.py  (10 bytes)\n\nREADME head (README.md, first 40 lines):\n  by [author] [author]\n\n"
-        "Definitions per source file:\n  a.py: compute_xrm\n\nPaper constructs searched in the code: XRM\n  XRM:\n    a.py:5: xrm = a * b + c  # by [author] [author]\n```\n\nMeta: {}\n")
+        "Files (2):\n  a.py  (10 bytes)\n\nREADME head (README.md, first 40 lines):\n  by Ada Author\n\n"
+        "Definitions per source file:\n  a.py: compute_xrm\n\nPaper constructs searched in the code: XRM\n  XRM:\n    a.py:5: xrm = a * b + c  # by Ada Author\n```\n\nMeta: {}\n")
 
     print("1. evidence block")
     ev = rqc.build_evidence_block(rid, str(rdir))
     check("5 references; 1 CONFIRMED by identifier, 1 MATCHED by text only, 2 with a DOI that disagrees (mismatch or dead), 1 UNVERIFIABLE" in ev, "counts line")
-    check("Varela et al. 2024 — DOI MISMATCH" in ev and "Moreau 2024 — DOI DEAD" in ev, "the lines the panel had to act on")
+    check("A. Nobody et al. 2024 — DOI MISMATCH" in ev and "Moreau 2024 — DOI DEAD" in ev, "the lines the panel had to act on")
     check("Brook 2026 — UNVERIFIABLE" in ev and "Hale 1983 — MATCHED by text [title-author-match]" in ev, "unverifiable + matched lines")
     check("CODE PACKAGE DIGEST" in ev and "a.py: compute_xrm" in ev and "a.py:5: xrm = a * b + c" in ev, "digest definitions + construct lines")
     check("Files (2)" not in ev and "README head" not in ev, "file list and README are left out (the auditor needs definitions, not the inventory)")
-    ev_b = rqc.build_evidence_block(rid, str(rdir), {"author_names": ["[author] [author]"], "affiliations": [], "emails": [], "orcids": []})
-    check("[author] [author]" not in ev_b and "[withheld]" in ev_b, "blinded with the manifest's spans")
+    ev_b = rqc.build_evidence_block(rid, str(rdir), {"author_names": ["Ada Author"], "affiliations": [], "emails": [], "orcids": []})
+    check("Ada Author" not in ev_b and "[withheld]" in ev_b, "blinded with the manifest's spans")
     check(rqc.build_evidence_block("ICSAC-SUB-TEST-0000000000", str(rdir)) == rqc.NO_EVIDENCE_NOTE, "nothing on disk -> the no-evidence note")
     big = dict(cits); big["citations"] = cits["citations"] * 400
     (rdir / "BIG_citations.json").write_text(json.dumps(big))
@@ -71,7 +71,7 @@ try:
 
     print("2. prompt")
     prompt = rqc.build_prompt("---\nrecord_id: x\n---\n# Review\n", ev)
-    check("<<<EVIDENCE_SUPPLIED>>>" in prompt and "Varela et al. 2024 — DOI MISMATCH" in prompt, "prompt carries the evidence block")
+    check("<<<EVIDENCE_SUPPLIED>>>" in prompt and "A. Nobody et al. 2024 — DOI MISMATCH" in prompt, "prompt carries the evidence block")
     check("5. evidence_use" in prompt and "6. injection_indicators" in prompt and '"evidence_use":' in prompt, "six dimensions + JSON schema")
     check("earns a 4, not a 5" in prompt, "re-anchored scale in the prompt")
     check(prompt.rindex("<<<EVIDENCE_SUPPLIED>>>") < prompt.rindex("<<<PANEL_REVIEW>>>"), "evidence precedes the untrusted panel block")

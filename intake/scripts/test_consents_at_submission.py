@@ -184,9 +184,9 @@ try:
     check(record(resp).get("resubmission") is None, "no answer -> resubmission None")
     st, resp = submit(**NEW, revised_version="no")
     check(st in (200, 202) and record(resp).get("resubmission") is None, "answer No -> None")
-    st, resp = submit(**NEW, revised_version="yes", resubmission_of="ICSAC-SUB-NNNNN")
+    st, resp = submit(**NEW, revised_version="yes", resubmission_of="icsac-sub-00042")
     r = record(resp).get("resubmission") or {}
-    check(st in (200, 202) and r.get("of") == "ICSAC-SUB-NNNNN" and r.get("previous_found") is False
+    check(st in (200, 202) and r.get("of") == "ICSAC-SUB-00042" and r.get("previous_found") is False
           and "response" not in r, f"Yes + ID: upper-cased, stored, no note field ({st})")
     prev_id = sid  # the exclusions paper from section 2, decided above via aa.record on an 'accept' state
     st, resp = submit(**NEW, revised_version="yes", resubmission_of=prev_id)
@@ -197,8 +197,8 @@ try:
     check(st == 400 and "previous submission ID" in json.dumps(resp), f"Yes without an ID -> 400 ({st})")
     st, resp = submit(**NEW, revised_version="yes", resubmission_of="SUB-9")
     check(st == 400 and "ICSAC-SUB-00000" in json.dumps(resp), f"malformed previous ID -> 400 ({st})")
-    st, resp = submit(**NEW, resubmission_of="ICSAC-SUB-NNNNN")
-    check(st in (200, 202) and (record(resp).get("resubmission") or {}).get("of") == "ICSAC-SUB-NNNNN", "an ID alone counts as Yes")
+    st, resp = submit(**NEW, resubmission_of="ICSAC-SUB-00042")
+    check(st in (200, 202) and (record(resp).get("resubmission") or {}).get("of") == "ICSAC-SUB-00042", "an ID alone counts as Yes")
 
     from intake import submission_worker as worker
     import review
