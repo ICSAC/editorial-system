@@ -230,6 +230,7 @@ try:
                                                     "dimension_scores": {}, "passes": 1})
     check(f"revision_of: {prev_id}" in md and f"**Revision of:** {prev_id} (previous decision: accept)" in md,
           "the review report's front matter and header carry the revision")
+    rd0 = worker._build_review_data(sid, subs / "test" / sid)
     md0 = review.generate_review_markdown(rd0, [[]], {"recommendation": "RECOMMEND", "models_used": ["x"], "disagreement": False,
                                                       "dimension_scores": {}, "passes": 1})
     check("revision_of" not in md0 and "Revision of" not in md0, "a first submission's report carries no revision line")
