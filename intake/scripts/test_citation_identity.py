@@ -6,7 +6,7 @@ that is removed at the end, pass or fail. Run from the repo root with the venv:
 
 Regression cases, each of which an earlier version of the
 verifier reported to the panel as REAL:
-  Varela 2024  -- the cited DOI resolves to a different paper (mismatch)
+  Case A  -- the cited DOI resolves to a different paper (mismatch)
   Case B  -- the cited DOI 404s; the real record has another DOI (dead)
   Case C  -- the cited DOI 404s (dead)
   Case D  -- no DOI; author-year search found a different preprint
@@ -73,7 +73,7 @@ try:
                                "abstract": "", "year": 1961, "authors": ["R. Lorimer"]},
     }
     DATACITE = {
-        "10.5281/zenodo.0000000": {"resolver": "datacite", "resolved_id": "10.5281/zenodo.0000000",
+        "10.5281/zenodo.1234567": {"resolver": "datacite", "resolved_id": "10.5281/zenodo.1234567",
                                     "title": "Tide Gauge Readings: A Sample Data Set",
                                     "abstract": "", "year": 2025, "authors": ["Author, Ada", "Author, Ben", "Author, Cy"]},
     }
@@ -112,9 +112,9 @@ try:
     cv._search_arxiv, cv._search_semanticscholar, cv._search_crossref_bibliographic = _arxiv, _s2, _biblio
 
     # ── the four regression cases ─────────────────────────────────────
-    print("[1] Varela 2024: the cited DOI belongs to another paper")
-    vac = {"raw": "Varela, G., Serra, V. D. P., Lorca, V., et al. (2024). Measuring lichen growth on coastal rocks: A field study. Journal of Field Studies, 8(12), 101–119.",
-           "authors": ["G. Varela", "V. D. P. Serra", "V. Lorca"], "year": 2024,
+    print("[1] Case A: the cited DOI belongs to another paper")
+    vac = {"raw": "Nobody, A., Nobody, B., & Nobody, C. (2024). Measuring lichen growth on coastal rocks: A field study. Journal of Field Studies, 8(12), 101–119.",
+           "authors": ["A. Nobody", "B. Nobody", "C. Nobody"], "year": 2024,
            "title": "Measuring lichen growth on coastal rocks: A field study",
            "doi": "10.0000/jfs.2024.0011", "arxiv_id": None, "type": "doi", "claim_context": ""}
     v = cv.verify_citation(dict(vac))
@@ -160,7 +160,7 @@ try:
     zen = {"raw": "Author, A., Author, B., & Author, C. (2025b). Tide Gauge Readings: A Sample Data Set (Version 1.0) [Data set]. Zenodo.",
            "authors": ["A. Author", "B. Author", "C. Author"], "year": 2025,
            "title": "Tide Gauge Readings: A Sample Data Set (Version 1.0) [Data set]",
-           "doi": "10.5281/zenodo.0000000", "arxiv_id": None, "type": "doi", "claim_context": ""}
+           "doi": "10.5281/zenodo.1234567", "arxiv_id": None, "type": "doi", "claim_context": ""}
     v = cv.verify_citation(dict(zen))
     check(v["verified"] and v["doi_identity"] == "confirmed" and v["resolver"] == "datacite", "Zenodo dataset confirmed via DataCite")
     and_ = {"raw": "Hollis, P. W. (1972). Less is enough: Small samples and the nature of the layered structure of field notes. Field Science, 177(4047), 393–396.",
@@ -205,11 +205,11 @@ try:
     rep = cv.build_verification_report(rep_in)
     check("ground truth" not in rep, "the report no longer calls itself ground truth")
     check("### Confirmed by identifier" in rep and "### Cited DOI disagrees" in rep, "sections present")
-    check("Varela et al. 2024** — DOI MISMATCH" in rep, "Varela listed as DOI MISMATCH")
+    check("A. Nobody et al. 2024** — DOI MISMATCH" in rep, "case A listed as DOI MISMATCH")
     check(re.search(r"Quarrie[^\n]*— DOI DEAD\.", rep) and "10.0000/jpc.2023.0929" in rep, "Quarrie listed as DOI DEAD with the real record")
     check("Brook 2026** — UNVERIFIABLE" in rep and "different work" in rep, "Brook unverifiable with the reason")
     check("— REAL." not in rep, "no line says REAL any more")
-    check("A. Author et al. 2025b** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines")
+    check("A. Author et al. 2025** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines")
     check("MATCHED" in rep and "existence check" in rep, "the fuzzy evidence level is explained")
     check(re.search(r"Ferreira[^\n]*— CONFIRMED\.[^\n]*translated or variant title", rep) is not None, "the variant title is shown on the confirmed line")
     cv.save_citation_report("ICSAC-SUB-TEST-1", rep_in, rep)
@@ -222,13 +222,13 @@ try:
 
     # ── CiteStamp coverage-gap log ────────────────────────────────────
     print("[8] coverage gaps")
-    results = [{"doi": "10.5281/zenodo.0000000", "in_graph": False, "edges": 0, "error": None},
+    results = [{"doi": "10.5281/zenodo.1234567", "in_graph": False, "edges": 0, "error": None},
                {"doi": "10.0000/fsci.1972.393", "in_graph": True, "edges": 3653, "error": None},
                {"doi": "10.0000/jfs.2024.0011", "in_graph": False, "edges": 0, "error": None}]
     n = cc._log_coverage_gaps(rep_in, results, log=lambda m: None)
     check(n == 1, f"one gap logged (confirmed + absent), not the mismatch ({n})")
     rows = [json.loads(l) for l in open(cc.COVERAGE_GAP_LOG)]
-    check(rows[0]["doi"] == "10.5281/zenodo.0000000" and rows[0]["title"].startswith("Tide Gauge"), "gap row carries DOI + registry title")
+    check(rows[0]["doi"] == "10.5281/zenodo.1234567" and rows[0]["title"].startswith("Tide Gauge"), "gap row carries DOI + registry title")
 
     # ── code digest on a synthetic archive ───────────────────────────
     print("[9] code digest")
@@ -252,14 +252,14 @@ try:
           and "case_beta.py:2: XRM = hits / trials" in md, "the two XRM definitions surface with file:line")
     check("NPT: not found in any source file" in md, "a construct absent from the code is said so")
     check("README head" in md and "Run case_alpha.py" in md, "README head shown")
-    check(cdg.classify("https://doi.org/10.5281/zenodo.0000000") == ("zenodo", "22152184")
+    check(cdg.classify("https://doi.org/10.5281/zenodo.1234567") == ("zenodo", "1234567")
           and cdg.classify("https://github.com/o/r.git") == ("github", "o/r")
           and cdg.classify("https://osf.io/abc")[0] == "other", "link classification")
-    links = cdg.links_from({"code_data": {"url": "https://doi.org/10.5281/zenodo.0000000"},
-                            "related_identifiers": [{"identifier": "10.5281/zenodo.0000000", "relation": "isSupplementTo"},
+    links = cdg.links_from({"code_data": {"url": "https://doi.org/10.5281/zenodo.1234567"},
+                            "related_identifiers": [{"identifier": "10.5281/zenodo.7654321", "relation": "isSupplementTo"},
                                                     {"identifier": "10.20944/x", "relation": "isNewVersionOf"}]},
-                           "see https://github.com/o/r for code and 10.5281/zenodo.0000000 again")
-    check(links[0].endswith("22152184") and "10.5281/zenodo.0000000" in links and any("github.com/o/r" in l for l in links)
+                           "see https://github.com/o/r for code and 10.5281/zenodo.1234567 again")
+    check(links[0].endswith("1234567") and "10.5281/zenodo.7654321" in links and any("github.com/o/r" in l for l in links)
           and not any("10.20944" in l for l in links) and len(links) == 3, f"links: declared, supplements, in-text; deduped ({links})")
     config.CODE_DIGEST_ENABLED = False
     md, meta = cdg.build({"code_data": {"url": "https://doi.org/10.5281/zenodo.1"}}, "x")
