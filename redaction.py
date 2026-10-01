@@ -796,14 +796,16 @@ def publish_public_review(
 # Review Quality Control — public redaction
 # --------------------------------------------------------------------------
 
-# The RQC rubric defines five dimensions. The first four are publishable;
+# The RQC rubric defines six dimensions. The first five are publishable;
 # ``injection_indicators`` is INTERNAL ONLY and must never appear in any
 # file written under src/data/public-reviews/. See rubrics/review_quality_control.md.
+# "Evidence Use" (2026-10-01) is absent from records audited before that date.
 RQC_PUBLIC_DIMENSIONS: tuple[str, ...] = (
     "Rubric Adherence",
     "Internal Consistency",
     "Specificity",
     "Tone",
+    "Evidence Use",
 )
 RQC_INJECTION_DIM_LABEL = "Injection Indicators"
 
@@ -975,8 +977,10 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         "",
         (
             "This audit quality checks each AI reviewer's assessment for "
-            "rubric adherence, internal consistency, specificity, and "
-            "institutional voice. It is published alongside the panel review "
+            "rubric adherence, internal consistency, specificity, "
+            "institutional voice and use of the verification evidence the "
+            "panel was given (the citation checks and the code package "
+            "digest). It is published alongside the panel review "
             "so the quality of the review process is as auditable as the "
             "review itself."
         ),
@@ -987,7 +991,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     if parsed.flag and _flag_cause_is_injection_only(parsed):
         lines.extend([
             (
-                "The audit surfaced a concern outside the four scholarly "
+                "The audit surfaced a concern outside the scholarly "
                 "dimensions above. The curation team reviewed the panel output "
                 "before the acceptance decision was recorded."
             ),
