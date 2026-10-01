@@ -1254,6 +1254,8 @@ def generate_review_markdown(review_data: dict, pass_results: list[list[dict]], 
         f"recommendation: {rec}",
         f"disagreement: {aggregate.get('disagreement', False)}",
         f"passes: {n_passes}",
+        *([f"revision_of: {(review_data.get('resubmission') or {}).get('of')}"]
+          if (review_data.get('resubmission') or {}).get('of') else []),
         "---",
         "",
         f"# Review: {review_data.get('title', 'Untitled')}",
@@ -1264,6 +1266,10 @@ def generate_review_markdown(review_data: dict, pass_results: list[list[dict]], 
         f"**Recommendation:** {rec}  ",
         f"**Panel Passes:** {n_passes}  ",
         f"**Model Disagreement:** {'Yes' if aggregate.get('disagreement') else 'No'}  ",
+        *([f"**Revision of:** {(review_data.get('resubmission') or {}).get('of')}"
+           + (f" (previous decision: {(review_data.get('resubmission') or {}).get('previous_decision')})"
+              if (review_data.get('resubmission') or {}).get('previous_decision') else "") + "  "]
+          if (review_data.get('resubmission') or {}).get('of') else []),
         *([f"**Citations:** {_citation_header_line(review_data.get('record_id'))}"]
           if _citation_header_line(review_data.get('record_id')) else []),
         "",

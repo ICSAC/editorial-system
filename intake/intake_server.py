@@ -471,6 +471,27 @@ def _parse_resubmission(form) -> dict | None:
     return {"of": of, "previous_found": previous_found, "previous_decision": previous_decision}
 
 
+def _mark_superseded(resubmission: dict | None, new_sub_id: str, root: Path, *, test_mode: bool) -> None:
+    """Write the back-link on the PREVIOUS submission: state.json gains
+    superseded_by / superseded_at, so its status page can say a revised
+    version was submitted and the chain can be walked from either end.
+    Only when the previous paper was found in the same root; never fatal."""
+    if not resubmission or not resubmission.get("previous_found"):
+        return
+    prev = root / resubmission["of"] / "state.json"
+    try:
+        data = json.loads(prev.read_text())
+        data["superseded_by"] = new_sub_id
+        data["superseded_at"] = _now_iso()
+        tmp = prev.with_name(prev.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        os.replace(tmp, prev)
+        _audit_append({"sub_id": resubmission["of"], "event": "superseded", "by": new_sub_id},
+                      test_mode=test_mode)
+    except Exception as exc:
+        print(f"superseded back-link on {resubmission.get('of')} failed (non-fatal): {exc}", file=sys.stderr)
+
+
 def _parse_code_data(available_raw, url_raw) -> dict:
     """The form's code and data question (2026-09-28): does the paper say code
     or data is available, and if so, where. ICSAC links to it and never hosts
@@ -1010,7 +1031,9 @@ async def handle_test_pipeline_submission(
         "test_mode": True,
         "tier": tier,
         "received_at": received_at,
+        **({"revision_of": resubmission["of"]} if resubmission else {}),
     }, indent=2))
+    _mark_superseded(resubmission, sub_id, TEST_SUBMISSIONS_ROOT, test_mode=True)
 
     # Drop a marker into the test queue. The submission worker reads
     # tier from submission.json and applies T2/T3 routing to its
@@ -1429,8 +1452,10 @@ async def api_submit(request: Request):
         json.dumps(submission_record, indent=2)
     )
     (sub_dir / "state.json").write_text(
-        json.dumps({"state": "received", "received_at": received_at}, indent=2)
+        json.dumps({"state": "received", "received_at": received_at,
+                    **({"revision_of": resubmission["of"]} if resubmission else {})}, indent=2)
     )
+    _mark_superseded(resubmission, sub_id, SUBMISSIONS_ROOT, test_mode=False)
 
     QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     (QUEUE_DIR / sub_id).write_text(received_at)
@@ -1450,6 +1475,8 @@ async def api_submit(request: Request):
         "process_ack_version": submitter.get("process_ack_version"),
         "exclusions_at_submission": submitter.get("exclusions_at_submission") or [],
         "newsletter_opt_in": bool(submitter.get("newsletter_opt_in")),
+        "resubmission_of": resubmission["of"] if resubmission else None,
+        "previous_found": resubmission["previous_found"] if resubmission else None,
     })
 
     # Newsletter opt-in (production only; the test tiers returned above). The
@@ -1545,6 +1572,10 @@ def api_submission_state(sub_id: str):
         # (audit 2026-09-28 pass B).
         "test_mode": bool(data.get("test_mode", False)),
         "tier": data.get("tier") if data.get("test_mode") else None,
+        # The revision chain, ids only: the status page says "a revised
+        # version was submitted as X" / "revised version of Y" (2026-10-01).
+        "superseded_by": data.get("superseded_by"),
+        "revision_of": data.get("revision_of"),
     }
 
 

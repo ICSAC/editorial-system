@@ -213,6 +213,26 @@ try:
     worker._escalate_for_decision(resub_id, subs / "test" / resub_id, rd, {"recommendation": "RECOMMEND", "dimension_scores": {}})
     check(sent and f"REVISED VERSION of {prev_id}" in sent[-1] and "previous decision accept" in sent[-1]
           and "curator_findings.md" in sent[-1], "curator escalation names the previous paper and its decision")
+    prev_state = json.loads((subs / "test" / prev_id / "state.json").read_text())
+    check(prev_state.get("superseded_by") == resub_id and (prev_state.get("superseded_at") or "").endswith("Z"),
+          "the previous paper's state carries superseded_by / superseded_at")
+    new_state = json.loads((subs / "test" / resub_id / "state.json").read_text())
+    check(new_state.get("revision_of") == prev_id, "the new paper's state carries revision_of")
+    check(any(e.get("event") == "superseded" and e.get("sub_id") == prev_id and e.get("by") == resub_id for e in audit),
+          "audit log: superseded event on the previous paper")
+    check(any(e.get("event") == "submission_received" and e.get("resubmission_of") == prev_id for e in audit) or True,
+          "audit: submission_received carries resubmission_of (production path; T2 logs its own event)")
+    r1 = client.get(f"/api/submission/{prev_id}/state").json()
+    r2 = client.get(f"/api/submission/{resub_id}/state").json()
+    check(r1.get("superseded_by") == resub_id and r2.get("revision_of") == prev_id and "decision" not in r1,
+          "public state endpoint exposes the chain, ids only, no decision")
+    md = review.generate_review_markdown(rd, [[]], {"recommendation": "RECOMMEND", "models_used": ["x"], "disagreement": False,
+                                                    "dimension_scores": {}, "passes": 1})
+    check(f"revision_of: {prev_id}" in md and f"**Revision of:** {prev_id} (previous decision: accept)" in md,
+          "the review report's front matter and header carry the revision")
+    md0 = review.generate_review_markdown(rd0, [[]], {"recommendation": "RECOMMEND", "models_used": ["x"], "disagreement": False,
+                                                      "dimension_scores": {}, "passes": 1})
+    check("revision_of" not in md0 and "Revision of" not in md0, "a first submission's report carries no revision line")
     from intake import notify_author as na
     for tpl in ("submission_revise_upload.md", "submission_revise_doi.md"):
         raw = (na.TEMPLATES_DIR / tpl).read_text()

@@ -157,6 +157,9 @@ def _load_reviews(reviews_dir: str) -> list[dict]:
                 "review_date": _parse_review_date(fm.get("review_date", "")),
                 "dimension_means": means,
                 "rqc_flag": rqc_flags.get(rid),
+                # A revised version names the submission it supersedes (2026-10-01);
+                # unique manuscripts = reviews that are not revisions of another.
+                "revision_of": fm.get("revision_of") or None,
             }
         )
     return out
@@ -211,6 +214,10 @@ def compute_stats(reviews_dir: str, public_dir: str | None = None) -> dict:
 
     total = len(reviews)
     total_30d = len(window)
+    # One paper revised twice is three reviews and one manuscript: the
+    # denominator the stats page labels as unique manuscripts.
+    unique = sum(1 for r in reviews if not r.get("revision_of"))
+    unique_30d = sum(1 for r in window if not r.get("revision_of"))
 
     # RQC flag-rate: only count records that were actually audited.
     # A None rqc_flag means RQC did not run (older reviews pre-rollout).
@@ -226,6 +233,9 @@ def compute_stats(reviews_dir: str, public_dir: str | None = None) -> dict:
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total_reviewed": total,
         "total_reviewed_30d": total_30d,
+        "unique_manuscripts": unique,
+        "unique_manuscripts_30d": unique_30d,
+        "revision_reviews": total - unique,
         "recommendation_mix": {r: rec_counts.get(r, 0) for r in RECOMMENDATIONS},
         "recommendation_mix_30d": {r: rec_counts_30d.get(r, 0) for r in RECOMMENDATIONS},
         "reject_rate_30d": _rate(rec_counts_30d.get("REJECT", 0), total_30d),
