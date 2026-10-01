@@ -109,6 +109,8 @@ try:
         return None
 
     cv._fetch_crossref, cv._fetch_datacite = _cr, _dc
+    # doi.org has no record of the dead DOIs in these fixtures (offline stub).
+    cv._doi_handle_status = lambda doi: "unregistered"
     cv._search_arxiv, cv._search_semanticscholar, cv._search_crossref_bibliographic = _arxiv, _s2, _biblio
 
     # ── the four regression cases ─────────────────────────────────────
@@ -135,7 +137,7 @@ try:
     check(v["doi_identity"] == "dead", "doi_identity == dead")
     check(v["confidence"] == "doi-dead", "confidence doi-dead")
     check(v.get("suggested_id") == "10.0000/jpc.2023.0929", f"suggested_id names the real record ({v.get('suggested_id')})")
-    check("does not resolve on Crossref or DataCite" in v["reason"] and "registry search finds" in v["reason"], "reason: dead + suggestion")
+    check("does not exist at doi.org" in v["reason"] and "registry search finds" in v["reason"], "reason: dead + suggestion")
     check("10.0000/jpc.2024.0422" in calls["datacite"], "DataCite was tried after Crossref 404")
 
     print("[3] Moreau 2024: dead DOI, nothing found by title")

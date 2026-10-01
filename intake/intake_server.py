@@ -471,12 +471,52 @@ def _parse_resubmission(form) -> dict | None:
     return {"of": of, "previous_found": previous_found, "previous_decision": previous_decision}
 
 
+def _norm_orcid(value: str | None) -> str:
+    """_normalize_orcid, plus the https://orcid.org/ prefix removed."""
+    return re.sub(r"^HTTPS?://(WWW\.)?ORCID\.ORG/", "", _normalize_orcid(value or ""))
+
+
+def _bind_resubmission_owner(resubmission: dict | None, auth_orcid: str) -> dict | None:
+    """A revised version links to its previous paper only when both were
+    submitted under the same VERIFIED ORCID (audit 2026-10-01 N1: any
+    signed-in submitter could name someone else's paper, even a published
+    one, and its public status page then said it had been superseded).
+    Sets resubmission["owner_match"]; the claim itself is kept for the
+    curator either way, and nothing links when it is False."""
+    if not resubmission:
+        return resubmission
+    of = resubmission.get("of") or ""
+    if TEST_SUB_ID_RE.match(of):
+        # Test papers store a per-paper token, not the ORCID; only the test
+        # accounts can create them, so a test ORCID owns every test paper.
+        resubmission["owner_match"] = bool(resubmission.get("previous_found")
+                                           and auth_orcid and is_test_submission(auth_orcid))
+        return resubmission
+    root = SUBMISSIONS_ROOT
+    prev_orcid = ""
+    if resubmission.get("previous_found"):
+        try:
+            auth = (json.loads((root / of / "submission.json").read_text()).get("auth") or {})
+            if auth.get("verified"):
+                prev_orcid = _norm_orcid(auth.get("orcid"))
+        except Exception:
+            prev_orcid = ""
+    new_orcid = _norm_orcid(auth_orcid)
+    resubmission["owner_match"] = bool(new_orcid and prev_orcid and new_orcid == prev_orcid)
+    return resubmission
+
+
+def _linked(resubmission: dict | None) -> bool:
+    return bool(resubmission and resubmission.get("owner_match"))
+
+
 def _mark_superseded(resubmission: dict | None, new_sub_id: str, root: Path, *, test_mode: bool) -> None:
     """Write the back-link on the PREVIOUS submission: state.json gains
     superseded_by / superseded_at, so its status page can say a revised
     version was submitted and the chain can be walked from either end.
-    Only when the previous paper was found in the same root; never fatal."""
-    if not resubmission or not resubmission.get("previous_found"):
+    Only when the previous paper was found in the same root and was
+    submitted under the same verified ORCID; never fatal."""
+    if not resubmission or not resubmission.get("previous_found") or not _linked(resubmission):
         return
     prev = root / resubmission["of"] / "state.json"
     try:
@@ -1031,7 +1071,7 @@ async def handle_test_pipeline_submission(
         "test_mode": True,
         "tier": tier,
         "received_at": received_at,
-        **({"revision_of": resubmission["of"]} if resubmission else {}),
+        **({"revision_of": resubmission["of"]} if _linked(resubmission) else {}),
     }, indent=2))
     _mark_superseded(resubmission, sub_id, TEST_SUBMISSIONS_ROOT, test_mode=True)
 
@@ -1222,6 +1262,7 @@ async def api_submit(request: Request):
     auth_orcid = (request.headers.get("x-icsac-auth-orcid") or "").strip()
     auth_name_enc = (request.headers.get("x-icsac-auth-name") or "").strip()
     auth_name = unquote(auth_name_enc) if auth_name_enc else ""
+    resubmission = _bind_resubmission_owner(resubmission, auth_orcid)
 
     # Tier resolution (test ORCIDs only). Production ORCIDs hard-pin to
     # tier 1, the X-ICSAC-Test-Tier header is ignored, and the production
@@ -1453,7 +1494,7 @@ async def api_submit(request: Request):
     )
     (sub_dir / "state.json").write_text(
         json.dumps({"state": "received", "received_at": received_at,
-                    **({"revision_of": resubmission["of"]} if resubmission else {})}, indent=2)
+                    **({"revision_of": resubmission["of"]} if _linked(resubmission) else {})}, indent=2)
     )
     _mark_superseded(resubmission, sub_id, SUBMISSIONS_ROOT, test_mode=False)
 
@@ -1477,6 +1518,7 @@ async def api_submit(request: Request):
         "newsletter_opt_in": bool(submitter.get("newsletter_opt_in")),
         "resubmission_of": resubmission["of"] if resubmission else None,
         "previous_found": resubmission["previous_found"] if resubmission else None,
+        "owner_match": resubmission.get("owner_match") if resubmission else None,
     })
 
     # Newsletter opt-in (production only; the test tiers returned above). The
@@ -1522,7 +1564,9 @@ async def api_submit(request: Request):
             f"Submitter: {submitter['name']} <{submitter['email']}>\n"
             f"License: {license_id or '(from DOI)'}\n"
             + (f"Revised version of: {resubmission['of'] or '(no ID given)'}"
-               f" ({'previous decision ' + str(resubmission['previous_decision']) if resubmission['previous_found'] else 'previous ID NOT FOUND'})\n" if resubmission else "")
+               f" ({'previous decision ' + str(resubmission['previous_decision']) if resubmission['previous_found'] else 'previous ID NOT FOUND'})"
+               f"{'' if _linked(resubmission) else ' -- NOT LINKED: not submitted under the same verified ORCID'}\n"
+               if resubmission else "")
             + f"Status: queued for panel review",
             parse_mode=None,
         )
