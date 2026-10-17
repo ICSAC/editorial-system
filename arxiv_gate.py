@@ -3,8 +3,8 @@
 arXiv's terms (https://info.arxiv.org/help/api/tou.html, read 2026-09-29):
 "make no more than one request every three seconds, and limit requests to a
 single connection at a time", applied to "all of the machines under your
-control as a whole". Machines that share one public IP share one budget, so
-that is one budget for all of them.
+control as a whole". Machines that share one public IP share that one
+budget.
 
 Every call to the API goes through get(): a lock shared by every process and
 thread on this host holds the single connection, calls start at least

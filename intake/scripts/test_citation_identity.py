@@ -14,8 +14,9 @@ plus: a Zenodo dataset DOI confirmed through DataCite; a short registry title
 ("Less Is Enough") confirmed; HTML in a Crossref title; a DOI with no cited
 title judged on authors + year; verify_all keeping the cited title and letting
 a DOI disagreement downgrade an earlier fuzzy "verified"; the report's
-sections and wording; the header line; the CiteStamp coverage-gap log; and the
-code package digest on a synthetic archive (no network).
+sections and wording; the header line; the CiteStamp coverage-gap log; the
+code package digest on a synthetic archive (no network); and web pages cited
+by URL, which must never be matched to a registry record by a fuzzy search.
 """
 from __future__ import annotations
 
@@ -211,8 +212,8 @@ try:
     check(re.search(r"Quarrie[^\n]*— DOI DEAD\.", rep) and "10.0000/jpc.2023.0929" in rep, "Quarrie listed as DOI DEAD with the real record")
     check("Brook 2026** — UNVERIFIABLE" in rep and "different work" in rep, "Brook unverifiable with the reason")
     check("— REAL." not in rep, "no line says REAL any more")
-    check("A. Author et al. 2025** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines")
-    check("MATCHED" in rep and "existence check" in rep, "the fuzzy evidence level is explained")
+    check("A. Author et al. 2025b** — CONFIRMED" in rep and "Hollis 1972** — CONFIRMED" in rep, "confirmed lines (the cited 2025b keeps its letter)")
+    check("UNCONFIRMED" in rep and "not evidence of anything" in rep, "the text-match level is explained as no evidence")
     check(re.search(r"Ferreira[^\n]*— CONFIRMED\.[^\n]*translated or variant title", rep) is not None, "the variant title is shown on the confirmed line")
     cv.save_citation_report("ICSAC-SUB-TEST-1", rep_in, rep)
     import review
@@ -281,14 +282,87 @@ try:
         check("{{curator_findings}}" in raw and "Curation team findings" in raw, f"{tpl}: findings section present")
     subj, body = na._render("submission_revise_upload.md", {
         "icsac_submission_id": "ICSAC-SUB-TEST-1", "title": "T", "author_name": "A",
-        "attachments_block": "(att)", "compaction_disclosure": "(disc)",
+        "attachments_block": "(att)", "compaction_disclosure": "(disc)", "revision_line": "",
         "curator_findings": "1. Fix the unit in Table 2.\n2. Define the sample window."})
     check("1. Fix the unit in Table 2." in body and "the decision is the curation team's" in body, "findings rendered")
     subj, body = na._render("submission_revise_upload.md", {
         "icsac_submission_id": "ICSAC-SUB-TEST-1", "title": "T", "author_name": "A",
-        "attachments_block": "(att)", "compaction_disclosure": "(disc)",
+        "attachments_block": "(att)", "compaction_disclosure": "(disc)", "revision_line": "",
         "curator_findings": "[CURATION TEAM FINDINGS - x]"})
     check("[CURATION TEAM FINDINGS" in body, "empty findings leave the loud bracket")
+
+    # ── web pages cited by URL ───────────────────────────────────────
+    print("[11] web sources")
+    check(not cv._title_matches("Data Policy", "Research Data Policy and Practice: An Overview"),
+          "a two-word title no longer matches a longer title that contains its words")
+    check(not cv._title_matches("Code of Conduct", "A Code of Conduct for Research Integrity"), "nor one with a different main title")
+    check(cv._title_matches("Spin glasses", "Spin Glasses: Experimental Facts, Theoretical Concepts, and Open Questions"),
+          "a short cited title still matches its record's main title")
+    check(cv._title_matches("Less is enough: Small samples and the nature of field notes", "Less Is Enough"),
+          "a short registry title still matches the cited main title")
+    WEBREC = {
+        "Style Guide": {"resolver": "crossref", "resolved_id": "10.0000/journal.style",
+                        "title": "Style Guide", "abstract": "", "year": 2026, "authors": []},
+        "Code of Conduct": {"resolver": "crossref", "resolved_id": "10.0000/book.conduct",
+                            "title": "A Code of Conduct for Research Integrity", "abstract": "", "year": 2026, "authors": []},
+        "Tide tables": {"resolver": "crossref", "resolved_id": "10.0000/paper.tides",
+                        "title": "Tide tables for small harbours", "abstract": "", "year": 2021,
+                        "authors": ["Jane Smith"]},
+    }
+    S2REC = {"resolver": "semanticscholar", "resolved_id": "10.0000/data.policy",
+             "title": "Research Data Policy and Practice: An Overview",
+             "abstract": "", "year": 2026, "authors": ["Q. Other"]}
+    old_bib, old_s2 = cv._search_crossref_bibliographic, cv._search_semanticscholar
+    cv._search_crossref_bibliographic = lambda raw, year=None: next(
+        (dict(r) for k, r in WEBREC.items() if k in raw), None)
+    cv._search_semanticscholar = lambda q, year=None: dict(S2REC) if "Data Policy" in q else None
+    inst = "Example Society"
+
+    def web(org, year, page, slug, host="example.org"):
+        return {"raw": f'{org}. {year}. "{page}." https://{host}/{slug}/.',
+                "authors": [org], "year": int(str(year)[:4]), "title": page, "doi": None, "arxiv_id": None,
+                "type": "url", "claim_context": ""}
+    guide, proc = web(inst, "2025a", "Style Guide", "style-guide"), web(inst, "2025b", "Data Policy", "data-policy")
+    eth = web("Sample Board", 2024, "Code of Conduct", "code-of-conduct", "example.net")
+    rules = web("Sample Board", 2023, "Membership Rules", "rules", "example.net")
+    for name, c in (("same-titled journal page", guide), ("S2 title-only hit", proc), ("reordered-title hit", eth),
+                    ("no registry hit at all", rules)):
+        v = cv.verify_citation(dict(c))
+        check(v["confidence"] == "web-source" and v["verified"] is False and v["resolved_id"].startswith("https://example.")
+              and "10.0000" not in json.dumps(v), f"{name}: WEB SOURCE, no DOI matched to it")
+    paper = {"raw": "Smith, J. 2021. Tide tables for small harbours. https://example.org/smith2021.pdf",
+             "authors": ["J. Smith"], "year": 2021, "title": "Tide tables for small harbours",
+             "doi": None, "arxiv_id": None, "type": "url", "claim_context": ""}
+    v = cv.verify_citation(dict(paper))
+    check(v["verified"] and v["confidence"] == "title-author-match" and v["resolved_id"] == "10.0000/paper.tides",
+          "a paper cited by URL that the registry matches on title AND author stays MATCHED")
+    check(cv._cited_web_url({"type": "url", "raw": "x https://doi.org/10.1/x"}) is None
+          and cv._cited_web_url({"type": "title-only", "raw": "x https://ssrn.com/abstract=1"}) is None,
+          "doi.org links and non-url types are not web sources")
+    stale = dict(proc, verified=True, confidence="title-only-match", resolved_id="10.0000/data.policy")
+    res = cv.verify_all([stale, dict(guide), dict(eth), dict(rules), dict(and_)])
+    check(res[0]["confidence"] == "web-source" and res[0]["verified"] is False,
+          "a re-check replaces an earlier fuzzy match on a web page")
+    rep = cv.build_verification_report(res)
+    check("### Cited by URL" in rep and "WEB SOURCE:" in rep, "web section + legend")
+    check(f"{inst} 2025b** — WEB SOURCE. *Data Policy*, https://example.org/data-policy/." in rep,
+          "the line names the cited page and its URL")
+    check("Practice: An Overview" not in rep and "10.0000/data.policy" not in rep and "MATCHED." not in rep,
+          "nothing unrelated is matched in the report")
+    check("### Unverifiable from public registries" not in rep, "web sources are not listed as unverifiable")
+    check(cv._short_label(guide) != cv._short_label(proc), "2025a and 2025b get distinct labels")
+    import citation_misattribution as cm
+    check(cm._short_label(guide).endswith("2025a"), "the misattribution labels carry the letter too")
+    check(not [c for c in res if c.get("confidence") == "web-source" and c.get("verified")],
+          "web sources are not verified, so the misattribution check never sees them")
+    cv.save_citation_report("ICSAC-SUB-TEST-2", res, rep)
+    line = review._citation_header_line("ICSAC-SUB-TEST-2")
+    check(line is not None and line.startswith("1/1 resolved · 4 cited by URL"), f"header line ({line})")
+    import review_quality_control as rqcm
+    ev = rqcm.build_evidence_block("ICSAC-SUB-TEST-2", config.REVIEWS_DIR)
+    check("0 UNVERIFIABLE, 4 WEB SOURCE" in ev and "— WEB SOURCE: https://example.org/data-policy/" in ev
+          and "every reference was confirmed" not in ev, "the RQC evidence names web sources as such")
+    cv._search_crossref_bibliographic, cv._search_semanticscholar = old_bib, old_s2
 
 finally:
     shutil.rmtree(TMP, ignore_errors=True)

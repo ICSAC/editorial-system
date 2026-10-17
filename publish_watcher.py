@@ -185,6 +185,9 @@ def _register_published(sub_dir: Path, submission: dict, deposit: dict) -> dict:
     cdu = publications.code_data_url(submission)
     if cdu:
         proto["code_data_url"] = cdu
+    kw = publications.clean_keywords(submission.get("keywords") or metadata.get("keywords"))
+    if kw:
+        proto["keywords"] = kw
 
     entry = publications.upsert_entry(proto)
     if not entry:

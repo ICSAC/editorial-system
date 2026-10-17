@@ -7,8 +7,7 @@ tick is recorded here with the wording version the author saw and the time.
 
 The list is ONE append-only JSONL file of events,
     ~/icsac-submissions/newsletter/subscribers.jsonl
-(inside the nightly encrypted backup,
-backup.sh:344). A row is either
+(covered by the nightly encrypted off-site backup). A row is either
     {"event": "subscribe", "email", "name", "sub_id", "consented_at", "wording_version", "source"}
 or  {"event": "unsubscribe", "email", "at", "via"}
 and the current list is the fold of the events, latest wins. Nothing is ever

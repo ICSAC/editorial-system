@@ -220,7 +220,8 @@ def _resolve_pending_doi(sub_id: str, sub_dir: Path,
             paper_path.unlink()
         src.rename(paper_path)
 
-    keywords = review_meta.get("keywords") or []
+    # Keywords the author typed on the DOI form win; the source record's fill in.
+    keywords = submission.get("keywords") or review_meta.get("keywords") or []
     if not isinstance(keywords, list):
         keywords = [str(keywords)]
     license_id = ""
@@ -707,6 +708,7 @@ def _email_decision(sub_id: str, sub_dir: Path, verdict: str,
         deposit_doi=deposit_doi, deposit_url=deposit_url,
         publications_url=publications_url,
         tier=tier,
+        revision_of=state.get("revision_of") or "",
     )
     if ok and tier == 1:
         # Decision emails go to Gmail Drafts (per 2026-05-07 policy).
@@ -791,6 +793,9 @@ def _register_doi_accept(sub_id: str, sub_dir: Path,
     cdu = publications.code_data_url(submission)
     if cdu:
         proto["code_data_url"] = cdu
+    kw = publications.clean_keywords(submission.get("keywords"))
+    if kw:
+        proto["keywords"] = kw
 
     entry = publications.upsert_entry(proto)
     if not entry:

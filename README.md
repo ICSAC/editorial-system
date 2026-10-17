@@ -142,7 +142,11 @@ this part of the pipeline sends an email or registers anything on its own.
    without an answer, then registers the DOI at Crossref, pushes the landing
    page, publishes the Zenodo archive under the same DOI, and drafts the
    author's "published" notice. Each step is checkpointed so a failed run
-   resumes where it stopped instead of repeating anything.
+   resumes where it stopped instead of repeating anything. Until then the
+   reserved DOI resolves nowhere: check it at `api.crossref.org/works/<doi>`
+   (404 until it is registered), never at doi.org, where a lookup of an
+   unregistered DOI counts as a failed resolution in Crossref's monthly
+   report for the prefix.
 4. **One follow-up** ([`intake/post_publication.py`](intake/post_publication.py)),
    seven days after registration: a drafted invitation to join the
    institute's reviewer pool. It is skipped when the author opted out of

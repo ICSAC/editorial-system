@@ -57,9 +57,9 @@ try:
 
     print("1. evidence block")
     ev = rqc.build_evidence_block(rid, str(rdir))
-    check("5 references; 1 CONFIRMED by identifier, 1 MATCHED by text only, 2 with a DOI that disagrees (mismatch or dead), 1 UNVERIFIABLE" in ev, "counts line")
+    check("5 references; 1 CONFIRMED by identifier, 1 UNCONFIRMED (no identifier cited; not evidence), 2 with a DOI that disagrees (mismatch or dead), 1 UNVERIFIABLE" in ev, "counts line")
     check("A. Nobody et al. 2024 — DOI MISMATCH" in ev and "Moreau 2024 — DOI DEAD" in ev, "the lines the panel had to act on")
-    check("Brook 2026 — UNVERIFIABLE" in ev and "Hale 1983 — MATCHED by text [title-author-match]" in ev, "unverifiable + matched lines")
+    check("Brook 2026 — UNVERIFIABLE" in ev and "Hale 1983 — UNCONFIRMED: no identifier cited" in ev, "unverifiable + matched lines")
     check("CODE PACKAGE DIGEST" in ev and "a.py: compute_xrm" in ev and "a.py:5: xrm = a * b + c" in ev, "digest definitions + construct lines")
     check("Files (2)" not in ev and "README head" not in ev, "file list and README are left out (the auditor needs definitions, not the inventory)")
     ev_b = rqc.build_evidence_block(rid, str(rdir), {"author_names": ["Ada Author"], "affiliations": [], "emails": [], "orcids": []})

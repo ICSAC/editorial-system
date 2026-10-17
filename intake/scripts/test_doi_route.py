@@ -53,7 +53,7 @@ try:
     base = {"sub_id": "ICSAC-SUB-00099", "title": "A test paper", "abstract": "An abstract.",
             "license": "cc-by-4.0", "creators": [{"name": "Test, Author", "orcid": "0000-0002-1825-0097"}]}
     doi_sub = dict(base, source="doi", doi="10.5281/zenodo.123456")
-    xml = cd.build_deposit_xml(doi_sub, doi="10.67697/icsac.2026.099",
+    xml = cd.build_deposit_xml(doi_sub, doi="10.5555/icsac.2026.099",
                                landing_url="https://icsacinstitute.org/publications/a-test-paper",
                                pdf_url="https://icsacinstitute.org/papers/ICSAC-SUB-00099.pdf",
                                content_type="journal-article")
@@ -67,12 +67,12 @@ try:
           "the deposit links the preprint (hasPreprint)")
     art = x[x.find("<journal_article"):]   # journal_metadata may carry the journal title DOI's own doi_data
     check(0 < art.find("<rel:program") < art.find("<doi_data"), "the relation sits before the article's doi_data")
-    up = cd.build_deposit_xml(dict(base, source="upload"), doi="10.67697/icsac.2026.098",
+    up = cd.build_deposit_xml(dict(base, source="upload"), doi="10.5555/icsac.2026.098",
                               landing_url="https://icsacinstitute.org/publications/x", pdf_url=None,
                               content_type="journal-article")
     cd.validate_xml(up)
     check(b"hasPreprint" not in up, "an upload deposit carries no preprint relation")
-    rp = cd.build_deposit_xml(doi_sub, doi="10.67697/icsac.2026.097",
+    rp = cd.build_deposit_xml(doi_sub, doi="10.5555/icsac.2026.097",
                               landing_url="https://icsacinstitute.org/publications/y", pdf_url=None,
                               content_type="report-paper")
     try:
@@ -102,7 +102,7 @@ try:
     check("has no other DOI and is not under review elsewhere" in t and "preprint" not in t.lower(),
           "upload route keeps its no-other-DOI line")
     ok, _ = na.send_published(to="author@example.com", sub_id="ICSAC-SUB-TEST-PUB", title="A test paper",
-                              author_name="Test Author", deposit_doi="10.67697/icsac.2026.099",
+                              author_name="Test Author", deposit_doi="10.5555/icsac.2026.099",
                               deposit_url="https://icsacinstitute.org/publications/a-test-paper",
                               publications_url="https://icsacinstitute.org/publications/a-test-paper",
                               preprint_doi="10.5281/zenodo.123456", stay_involved=False, tier=2)

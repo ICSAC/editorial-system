@@ -75,7 +75,7 @@ try:
     (sub / "submission.json").write_text(json.dumps({"sub_id": sub.name, "title": "T", "source": "upload"}))
     (sub / "state.json").write_text(json.dumps({"decision": "accept", "state": "completed", "deposit_record_id": "555"}))
     (sub / "crossref/deposit.xml").write_bytes(b"<x/>")
-    (sub / "crossref/staged.json").write_text(json.dumps({"doi": "10.67697/icsac.2026.998", "registered": False}))
+    (sub / "crossref/staged.json").write_text(json.dumps({"doi": "10.5555/icsac.2026.998", "registered": False}))
     cd.stage = lambda *a, **k: None
     cd.validate_xml = lambda b: None
     cd.deposit = lambda *a, **k: "batch-1"

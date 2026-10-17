@@ -51,6 +51,10 @@ def send_telegram(message: str, parse_mode: str | None = "Markdown",
     payload = {
         "chat_id": chat_id,
         "text": message,
+        # No link previews: Telegram fetches every link in a message to build one,
+        # and a doi.org link fetched before Crossref registers the DOI counts as a
+        # failed resolution in the prefix's monthly report.
+        "link_preview_options": {"is_disabled": True},
     }
     if parse_mode:
         payload["parse_mode"] = parse_mode

@@ -51,7 +51,7 @@ try:
     real_run = subprocess.run
     pub.subprocess.run = lambda cmd, **k: (git_calls.append(cmd), subprocess.CompletedProcess(cmd, 0, "", ""))[1]
 
-    proto = {"title": "A held paper", "authors": ["A. Author"], "doi": "10.67697/icsac.2026.990",
+    proto = {"title": "A held paper", "authors": ["A. Author"], "doi": "10.5555/icsac.2026.990",
              "source": "submission-pdf", "sub_id": "ICSAC-SUB-00990"}
 
     print("1. the writers refuse without approval")

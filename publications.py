@@ -86,6 +86,32 @@ _OPTIONAL_KEYS = (
 )
 
 
+KEYWORD_LIMIT = 12
+KEYWORD_MAX_CHARS = 80
+
+
+def clean_keywords(raw: Any) -> list[str]:
+    """Keywords as the paper page shows them: a list or a comma/semicolon
+    string in; each item split on commas and semicolons, trimmed, trailing
+    full stops dropped, case-insensitive duplicates and over-long items
+    removed, at most KEYWORD_LIMIT kept in the author's order."""
+    if raw is None:
+        return []
+    items = raw if isinstance(raw, (list, tuple)) else [raw]
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        for part in re.split(r"[,;]+", str(item)):
+            k = re.sub(r"\s+", " ", part).strip().rstrip(".").strip()
+            if not k or len(k) > KEYWORD_MAX_CHARS or k.casefold() in seen:
+                continue
+            seen.add(k.casefold())
+            out.append(k)
+            if len(out) >= KEYWORD_LIMIT:
+                return out
+    return out
+
+
 def code_data_url(submission: dict) -> Optional[str]:
     """The author's public code and data link from the submission form, if
     any. The paper page prints it as hosted by the author; ICSAC never hosts it."""

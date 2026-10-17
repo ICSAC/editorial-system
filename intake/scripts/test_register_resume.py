@@ -36,7 +36,7 @@ try:
     (sub / "submission.json").write_text(json.dumps({"sub_id": sub.name, "title": "T", "source": "upload"}))
     (sub / "state.json").write_text(json.dumps({"decision": "accept", "state": "completed"}))
     (sub / "crossref/deposit.xml").write_bytes(b"<x/>")
-    (sub / "crossref/staged.json").write_text(json.dumps({"doi": "10.67697/icsac.2026.999", "registered": False}))
+    (sub / "crossref/staged.json").write_text(json.dumps({"doi": "10.5555/icsac.2026.999", "registered": False}))
 
     calls = {"deposit": 0, "stage": 0}
     cd.stage = lambda *a, **k: calls.__setitem__("stage", calls["stage"] + 1)

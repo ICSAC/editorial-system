@@ -4,7 +4,7 @@ Subject: ICSAC review complete — revise and resubmit — {{icsac_submission_id
 
 The review of your submission is complete.
 
-**Submission ID:** {{icsac_submission_id}}
+**Submission ID:** {{icsac_submission_id}}{{revision_line}}
 **Title:** {{title}}
 **Decision:** Revise and resubmit
 
@@ -22,7 +22,7 @@ Revise the manuscript and submit the new version through the same form at [icsac
 
 If you think a finding above is mistaken, leave the paper as it was on that point and say so in an email to [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with this submission ID in the subject line. The curation team reads every such message, and a finding we got wrong is withdrawn.
 
-Resubmissions are evaluated by a fresh panel run; reviewer identities are not preserved across rounds, and there is no implicit credit for the original review. Each pass is independent.
+A resubmission gets a fresh panel run: the panel does not see this letter or the earlier review. The curation team does, and checks the new version against the findings in this letter.
 
 There is no limit on the number of revise-and-resubmit rounds. ICSAC does not charge submission, review, or article-processing fees at any stage.
 

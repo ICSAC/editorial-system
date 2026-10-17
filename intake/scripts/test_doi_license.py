@@ -143,7 +143,7 @@ try:
     sub = {"sub_id": "ICSAC-SUB-00099", "title": "T", "abstract": "A.", "source": "doi", "doi": "2401.12345",
            "license": "cc-by-sa-4.0", "article_license": "cc-by-sa-4.0", "preprint_license": "",
            "creators": [{"name": "Test, Author"}]}
-    xml = cd.build_deposit_xml(sub, doi="10.67697/icsac.2026.099", landing_url="https://icsacinstitute.org/publications/t",
+    xml = cd.build_deposit_xml(sub, doi="10.5555/icsac.2026.099", landing_url="https://icsacinstitute.org/publications/t",
                                pdf_url=None, content_type="journal-article")
     cd.validate_xml(xml)
     check(b"creativecommons.org/licenses/by-sa/4.0" in xml and b"hasPreprint" in xml,

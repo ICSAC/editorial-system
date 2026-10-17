@@ -161,13 +161,14 @@ REVIEW_PROMPT_TEMPLATE = textwrap.dedent("""\
        (c) IDENTIFIER DISAGREEMENT. The citation verification (its legend above these
            instructions, its per-reference CITATION VERIFICATION RESULTS inside the
            submission block) checked every reference and marks each one CONFIRMED (identifier resolves
-           and matches), MATCHED (found by text only; existence, not identity),
+           and matches), UNCONFIRMED (no identifier cited; identity not checked, no record shown),
            DOI MISMATCH / DOI DEAD (the cited DOI points to a different work, or
            nowhere), or UNVERIFIABLE. A MISMATCH or DEAD line is a citation-integrity
            finding to score and to name in the justification: it shows a wrong
            identifier, wrong authors, or a reference assembled from several works,
            and it bears on the paper's statement about how its references were
-           checked. A MATCHED line is not proof of the cited authors, venue or pages.
+           checked. An UNCONFIRMED line is not evidence of anything: it is neither a
+           finding against the paper nor a credit to it.
 
        Score the dimension based on (a)+(b)+(c) combined. If you cannot verify (a) one
        way or the other, weight (b) more heavily and explicitly say so in the
@@ -234,6 +235,16 @@ def _creator_display_names(creators) -> list[str]:
     return out or ["Unknown"]
 
 
+# What the panel reads when there are no per-reference results. A bare "(none)"
+# was read by some models as "no problems found" and reported as a clean
+# verification; the empty case has to say that nothing was checked.
+NO_VERIFICATION_DATA = (
+    "(No per-reference citation results: verification was not run, or failed, for "
+    "this submission. Nothing about its references is established -- neither that "
+    "they exist nor that they are the works cited. Do not write that any reference "
+    "was confirmed, matched or found free of problems; call them unverified.)")
+
+
 def split_verification_report(report: str) -> tuple[str, str]:
     """(legend, per-reference data). The legend is the fixed text before the
     first '### ' section and carries nothing from the submission; everything
@@ -278,7 +289,7 @@ def build_prompt(review_data: dict, verification_report: str = "") -> str:
         full_text=full_text,
         related_identifiers=related_str,
         code_digest=(review_data.get("code_digest") or "").strip() or "(none)",
-        verification_data=verification_data or "(none)",
+        verification_data=verification_data or NO_VERIFICATION_DATA,
     )
     head = legend
     if rubric_context:
@@ -637,6 +648,107 @@ def run_hf_router_review(prompt: str, hf_model: str, capture_path: str = None) -
     return result
 
 
+def _usage_terms(spec: dict):
+    """The usage cap a provider carries, or None. Workers AI: a daily neuron cap
+    (a free daily allocation, billed past it on a paid account). Mistral: a
+    monthly USD cap (a card-backed account that must never pass its allowance).
+    Rates are units per million input / output tokens."""
+    if spec.get("daily_neuron_cap"):
+        return {"period": "day", "cap": spec["daily_neuron_cap"], "rates": spec.get("neuron_rates") or {},
+                "unit": "neurons", "keep": 7}
+    if spec.get("monthly_cap_usd"):
+        return {"period": "month", "cap": spec["monthly_cap_usd"], "rates": spec.get("usd_rates") or {},
+                "unit": "USD", "keep": 13}
+    return None
+
+
+def _usage_ledger_path(provider: str) -> str:
+    d = os.environ.get("ICSAC_STATE_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "state")
+    return os.path.join(d, "cf_neurons.json" if provider == "cloudflare" else f"{provider}_usage.json")
+
+
+def _usage_ledger_update(provider: str, fn, keep: int = 7):
+    """Read-modify-write one provider's usage ledger under an exclusive lock
+    (panel slots call in parallel). `fn(ledger) -> result`; the ledger keeps the
+    last `keep` periods."""
+    import fcntl
+    path = _usage_ledger_path(provider)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            with open(path) as f:
+                ledger = json.load(f)
+        except (OSError, ValueError):
+            ledger = {}
+        result = fn(ledger)
+        for key in sorted(ledger)[:-keep]:
+            ledger.pop(key, None)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(ledger, f)
+        os.replace(tmp, path)
+        return result
+
+
+def _usage_amount(terms: dict, tokens_in: float, tokens_out: float, rate) -> float:
+    import math
+    x = tokens_in * rate[0] / 1e6 + tokens_out * rate[1] / 1e6
+    return math.ceil(x) if terms["unit"] == "neurons" else math.ceil(x * 1e4) / 1e4
+
+
+def _usage_reserve(provider: str, spec: dict, model: str, prompt: str, max_tokens: int):
+    """A provider with a usage cap is metered BEFORE the call. Reserves a
+    deliberately high estimate (a token per 3 characters of prompt, every output
+    token used) and refuses the call when the period's total (UTC day or UTC
+    month) could cross the cap, or when the model has no rate on file.
+    Returns (period_key, reserved, error)."""
+    terms = _usage_terms(spec)
+    if not terms:
+        return None, 0, ""
+    rate = terms["rates"].get(model)
+    if not rate:
+        return None, 0, f"no {terms['unit']} rate on file for {model}; refused so the cap cannot be overrun"
+    est = _usage_amount(terms, len(prompt) / 3, max_tokens, rate)
+    now = datetime.now(timezone.utc)
+    key = now.strftime("%Y-%m-%d") if terms["period"] == "day" else now.strftime("%Y-%m")
+    cap = terms["cap"]
+
+    def _take(ledger):
+        used = ledger.get(key, 0)
+        if used + est > cap:
+            if terms["unit"] == "USD":
+                return (f"monthly spending guard: ${used:.4f} used + ${est:.4f} estimated > ${cap:.2f} "
+                        f"(resets on the 1st, UTC)")
+            return (f"daily free-allocation guard: {used} used + {est} estimated > {cap} neurons "
+                    f"(resets 00:00 UTC)")
+        ledger[key] = round(used + est, 4)
+        return ""
+    err = _usage_ledger_update(provider, _take, terms["keep"])
+    return (None, 0, err) if err else (key, est, "")
+
+
+def _usage_settle(provider: str, spec: dict, model: str, key, reserved, usage=None) -> None:
+    """Replace a reservation with what the reported token counts imply (or with
+    0 when the call was refused before inference). Without usage figures the
+    reservation stands."""
+    terms = _usage_terms(spec)
+    if not terms or not key or not reserved:
+        return
+    if usage == 0:
+        actual = 0
+    elif isinstance(usage, dict) and usage.get("prompt_tokens") is not None:
+        rate = terms["rates"].get(model) or (0, 0)
+        actual = _usage_amount(terms, int(usage.get("prompt_tokens") or 0),
+                               int(usage.get("completion_tokens") or 0), rate)
+    else:
+        return
+
+    def _fix(ledger):
+        ledger[key] = round(max(0, ledger.get(key, 0) - reserved + actual), 4)
+    _usage_ledger_update(provider, _fix, terms["keep"])
+
+
 def run_oai_compat_review(prompt: str, provider: str, model: str, capture_path: str = None) -> dict:
     """Run review against an OpenAI-compatible provider called DIRECTLY with our
     own key (2026-09-28): `oai|<provider>|<model>` panel entries. Providers and
@@ -660,6 +772,12 @@ def run_oai_compat_review(prompt: str, provider: str, model: str, capture_path: 
         "temperature": 0.3,
         "max_tokens": 4000,
     }
+    # Per-model request overrides (config: the provider's model_params), e.g. a
+    # larger max_tokens where hidden reasoning counts inside it, or JSON mode.
+    payload.update((spec.get("model_params") or {}).get(model) or {})
+    day, reserved, guard_err = _usage_reserve(provider, spec, model, prompt, payload["max_tokens"])
+    if guard_err:
+        return {"error": f"{provider}: {guard_err}", "model": label}
     req = urllib.request.Request(spec["base_url"].rstrip("/") + "/chat/completions",
                                  data=_json.dumps(payload).encode())
     req.add_header("Authorization", f"Bearer {api_key}")
@@ -682,12 +800,16 @@ def run_oai_compat_review(prompt: str, provider: str, model: str, capture_path: 
     except urllib.error.HTTPError as e:
         ex.shutdown(wait=False)
         body = e.read()[:300].decode(errors="replace")
+        if 400 <= e.code < 500 and e.code != 408:
+            _usage_settle(provider, spec, model, day, reserved, 0)   # refused before inference
         return {"error": f"HTTP {e.code}: {body}", "model": label}
     except Exception as e:
         ex.shutdown(wait=False)
         return {"error": str(e), "model": label}
     ex.shutdown(wait=False)
 
+    if isinstance(data, dict):
+        _usage_settle(provider, spec, model, day, reserved, data.get("usage"))
     if not isinstance(data, dict):
         return {"error": f"unexpected {provider} response shape", "model": label}
     if data.get("error"):
@@ -1605,8 +1727,14 @@ def _citation_header_line(record_id) -> str | None:
     parts = []
     cits = payload.get("citations") or []
     if cits:
-        parts.append(f"{sum(1 for c in cits if c.get('verified'))}/{len(cits)} resolved")
+        web = sum(1 for c in cits if c.get("confidence") == "web-source")
         import citation_verify
+        parts.append(f"{sum(1 for c in cits if citation_verify.is_identity_confirmed(c))}/{len(cits) - web} resolved")
+        unconfirmed = sum(1 for c in cits if citation_verify.is_unconfirmed_match(c))
+        if unconfirmed:
+            parts.append(f"{unconfirmed} unconfirmed")
+        if web:
+            parts.append(f"{web} cited by URL")
         idc = citation_verify.identity_counts(cits)
         if idc["mismatch"] or idc["dead"]:
             parts.append(f"DOI identity: {idc['mismatch']} mismatch, {idc['dead']} dead")
@@ -1720,7 +1848,8 @@ def _append_citation_verify_audit(record_id: str, citations: list[dict], error) 
     try:
         import datetime, json as _json
         verified = sum(1 for c in citations if c.get("verified"))
-        unverifiable = sum(1 for c in citations if not c.get("verified"))
+        web = sum(1 for c in citations if c.get("confidence") == "web-source")
+        unverifiable = sum(1 for c in citations if not c.get("verified")) - web
         entry = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "event": "citation_verify_completed",
@@ -1728,6 +1857,7 @@ def _append_citation_verify_audit(record_id: str, citations: list[dict], error) 
             "citation_count": len(citations),
             "verified_count": verified,
             "unverifiable_count": unverifiable,
+            "web_source_count": web,
             "extraction_error": (
                 None if not error else f"{type(error).__name__}: {error}"
             ),
@@ -1771,6 +1901,25 @@ def _fire_compaction_pain(review_data: dict, reason: str) -> None:
         pass
 
 
+def _known_identity(review_data: dict) -> dict:
+    """The submission's own identifiers, for compaction's anonymized-manuscript
+    check: creator names; creator ORCID iDs and affiliations and the submitter's
+    email and ORCID ("other", matched whole). No names -> compaction fails closed
+    on an empty extraction, as before."""
+    names, other = [], []
+    for c in review_data.get("creators") or []:
+        if isinstance(c, str):
+            names.append(c)
+        elif isinstance(c, dict):
+            if c.get("name"):
+                names.append(c["name"])
+            other += [c.get(k) for k in ("orcid", "affiliation") if c.get(k)]
+    sub = ((review_data.get("raw_metadata") or {}).get("submission") or {})
+    other += [sub.get(k) for k in ("submitter_email", "submitter_orcid") if sub.get(k)]
+    names = [n for n in names if "withheld" not in str(n)]
+    return {"names": names, "other": [o for o in other if str(o).strip()]}
+
+
 def review_paper(review_data: dict) -> tuple[str, dict]:
     """Run full multi-model review with self-heal + multi-pass aggregation.
 
@@ -1803,6 +1952,7 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     redacted_text, compaction_manifest = review_compaction.compact_paper(
         original_text,
         log=lambda m: print(m, file=__import__("sys").stderr),
+        known_identity=_known_identity(review_data),
     )
     if compaction_manifest.get("_failure"):
         # FAIL CLOSED. Blind-review compaction failed, so the manuscript

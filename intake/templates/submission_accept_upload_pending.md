@@ -4,7 +4,7 @@ Subject: ICSAC review complete — accepted — {{icsac_submission_id}}
 
 Your manuscript has been accepted for publication by the Institute for Complexity Science and Advanced Computing.
 
-**Submission ID:** {{icsac_submission_id}}
+**Submission ID:** {{icsac_submission_id}}{{revision_line}}
 **Title:** {{title}}
 **Received:** {{received_date}}
 **Decision:** {{decided_date}} — accepted
