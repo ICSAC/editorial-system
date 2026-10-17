@@ -653,6 +653,12 @@ def _normalize_for_match(s: str) -> str:
     return " ".join(s.split())
 
 
+def _main_title(s: str) -> str:
+    """The title before its subtitle ('Spin Glasses: Experimental Facts…'
+    -> 'spin glasses'), normalized."""
+    return _normalize_for_match(re.split(r"\s*[:—–?]\s*|\s+-\s+", s or "", maxsplit=1)[0])
+
+
 def _title_matches(claimed: str | None, resolved: str) -> bool:
     if not claimed or not resolved:
         return False
@@ -662,6 +668,13 @@ def _title_matches(claimed: str | None, resolved: str) -> bool:
         return False
     if a == b:
         return True
+    # A title of three words or fewer matches only the other side's main
+    # title. Word overlap let a two-word title ("Data Policy") match any
+    # longer title that happens to contain both words.
+    if len(a.split()) < 4:
+        return a == _main_title(resolved)
+    if len(b.split()) < 4:
+        return b == _main_title(claimed)
     # Substring match in either direction (handles subtitle truncation)
     if len(a) >= 20 and a in b:
         return True
@@ -717,7 +730,47 @@ def _find_probable_record(c: dict) -> dict | None:
     return candidates[0] if candidates else None
 
 
+_URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
+_REGISTRY_URL_RE = re.compile(r"https?://(?:dx\.)?doi\.org/|https?://(?:export\.)?arxiv\.org/", re.I)
+
+
+def _cited_web_url(c: dict) -> str | None:
+    """The URL a reference gives as its handle when the extractor typed it a
+    web source ("url") and it carries no DOI or arXiv ID; else None."""
+    if c.get("type") != "url" or c.get("doi") or c.get("arxiv_id"):
+        return None
+    for m in _URL_RE.finditer(c.get("raw") or ""):
+        url = m.group(0).rstrip(".,;)")
+        if not _REGISTRY_URL_RE.match(url):
+            return url
+    return None
+
+
 def verify_citation(c: dict) -> dict:
+    """A reference cited by URL (a policy page, documentation) is a web
+    source: the URL is its identifier, as a DOI is a paper's. The registry
+    searches may still find it as a scholarly work, but only on title AND
+    author; anything weaker is a neighbouring record, so the reference is
+    reported as cited by URL and nothing is matched to it. Otherwise a short
+    page title matches an unrelated paper whose title contains the same
+    words, and the panel judges that paper against the claim."""
+    out = _verify_against_registries(c)
+    url = _cited_web_url(c)
+    if url and out.get("confidence") != "title-author-match":
+        return {
+            "verified": False,
+            "resolver": "url",
+            "resolved_id": url,
+            "title": c.get("title") or "",
+            "abstract": "",
+            "confidence": "web-source",
+            "reason": "Cited by URL: a web page, not a registry work. Not matched to any registry "
+                      "record and not opened by the verifier.",
+        }
+    return out
+
+
+def _verify_against_registries(c: dict) -> dict:
     """Single citation lookup — arXiv → Crossref/DataCite → Semantic Scholar.
 
     Order matters. Exact-id resolvers (arXiv ID, DOI) get exact-id
@@ -978,10 +1031,12 @@ def verify_all(citations: list[dict], max_concurrent: int = 8) -> list[dict]:
             # expect the registry title there); keep what the paper cited.
             if "cited_title" not in merged:
                 merged["cited_title"] = citations[i].get("title")
-            if merged.get("verified") and not v.get("verified") and v.get("doi_identity") not in ("dead", "mismatch"):
+            if (merged.get("verified") and not v.get("verified")
+                    and v.get("doi_identity") not in ("dead", "mismatch") and v.get("confidence") != "web-source"):
                 # A recheck that could not confirm never downgrades a citation
                 # verified earlier (audit 2026-09-28 item 17) -- unless the
-                # citation's own DOI now disagrees: that is a finding, not a miss.
+                # citation's own DOI now disagrees, or it is a web page an
+                # earlier fuzzy search matched to a paper: findings, not misses.
                 merged["recheck_reason"] = str(v.get("reason", ""))[:200]
             else:
                 merged.update(v)
@@ -999,6 +1054,23 @@ def identity_counts(citations: list[dict]) -> dict:
     return counts
 
 
+def is_identity_confirmed(c: dict) -> bool:
+    """CONFIRMED: the reference cites an identifier (DOI or arXiv ID) that resolves
+    to the cited work. Only this level can ground an integrity finding -- a
+    misattribution verdict, a citation-graph refutation, a deposited citation
+    link: a work nobody is sure is the cited one cannot be judged against a claim."""
+    return bool(c.get("verified")) and c.get("confidence") == "exact-id"
+
+
+def is_unconfirmed_match(c: dict) -> bool:
+    """A registry record found by text search for a reference that cites no
+    identifier. It may be the cited work or a neighbour of it (a review of the
+    book, one of its chapters, another paper with the same words in its title),
+    so it is UNCONFIRMED: kept in the JSON for the curator, shown to no
+    reviewer, never evidence for or against the paper."""
+    return bool(c.get("verified")) and c.get("confidence") not in ("exact-id", "web-source")
+
+
 def build_verification_report(citations: list[dict]) -> str:
     """Render the verification report as a markdown block suitable for
     prompt injection above the DEFENSIVE_PREAMBLE + submission block.
@@ -1006,10 +1078,11 @@ def build_verification_report(citations: list[dict]) -> str:
     if not citations:
         return ""
 
-    confirmed = [c for c in citations if c.get("verified") and c.get("confidence") == "exact-id"]
-    matched = [c for c in citations if c.get("verified") and c.get("confidence") != "exact-id"]
+    confirmed = [c for c in citations if is_identity_confirmed(c)]
+    unconfirmed = [c for c in citations if is_unconfirmed_match(c)]
     disagree = [c for c in citations if not c.get("verified") and c.get("doi_identity") in ("mismatch", "dead")]
-    unverifiable = [c for c in citations if not c.get("verified") and c not in disagree]
+    web = [c for c in citations if c.get("confidence") == "web-source"]
+    unverifiable = [c for c in citations if not c.get("verified") and c not in disagree and c not in web]
 
     lines = [
         "## Citation verification (independently verified before review)",
@@ -1021,12 +1094,13 @@ def build_verification_report(citations: list[dict]) -> str:
         "- CONFIRMED [exact-id]: the cited identifier (DOI or arXiv ID) resolves and",
         "  its record matches the cited title (or the authors and year when no title",
         "  was cited). The work exists as cited. Do not call it fabricated.",
-        "- MATCHED [title-author-match / title-year-match / author-year-match]: no",
-        "  identifier was cited; a registry record matching the citation's text was",
-        "  found. The work exists; the match is textual and could be a neighbouring",
-        "  work. Do not call it fabricated; you may question whether it is the work",
-        "  meant, and you must read it as an existence check, not as confirmation of",
-        "  the cited authors, venue or pages.",
+        "- UNCONFIRMED: no identifier was cited, so the reference's identity could",
+        "  not be confirmed. A text search of the registries may have found a",
+        "  possible record; it is deliberately not shown, because it may be a",
+        "  different work (a review of the book, a chapter, a paper with similar",
+        "  words in its title). UNCONFIRMED is not evidence of anything: do not call",
+        "  the reference fabricated, misattributed or citation stuffing on its",
+        "  account, and do not credit it as verified either. Judge it from the paper.",
         "- DOI MISMATCH: the citation carries a DOI that resolves to a DIFFERENT work.",
         "  DOI DEAD: the cited DOI resolves nowhere. Both are citation-integrity",
         "  defects in their own right (a wrong identifier, wrong authors, or a",
@@ -1035,6 +1109,10 @@ def build_verification_report(citations: list[dict]) -> str:
         "  matching the cited title exists it is given, so the author can be pointed",
         "  to it.",
         "- UNVERIFIABLE: no registry record was found. Not evidence of fabrication.",
+        "- WEB SOURCE: the reference is a web page cited by its URL (a policy page,",
+        "  documentation). It is not a registry work, so no registry record was",
+        "  matched to it and the verifier did not open it. Not evidence of",
+        "  fabrication or of misattribution; the page is the one at that URL.",
         "",
     ]
 
@@ -1058,10 +1136,14 @@ def build_verification_report(citations: list[dict]) -> str:
         lines.extend(_line(c, "CONFIRMED") for c in confirmed)
         lines.append("")
 
-    if matched:
-        lines.append("### Matched by text, no identifier cited (exists; identity not confirmed)")
+    if unconfirmed:
+        lines.append("### Unconfirmed: no identifier cited (not evidence of anything)")
         lines.append("")
-        lines.extend(_line(c, "MATCHED") for c in matched)
+        for c in unconfirmed:
+            claim = c.get("claim_context") or ""
+            tail = f" Submission claim context: \"{claim}\"" if claim else ""
+            lines.append(f"- **{_short_label(c)}** — UNCONFIRMED. No identifier was cited; "
+                         f"not checked against any record.{tail}")
         lines.append("")
 
     if disagree:
@@ -1075,6 +1157,17 @@ def build_verification_report(citations: list[dict]) -> str:
             if cited and c.get("doi_identity") == "mismatch":
                 head += f" Cited as *{cited}* with DOI {c.get('doi')}."
             lines.append(f"{head} {c.get('reason') or ''}".rstrip())
+        lines.append("")
+
+    if web:
+        lines.append("### Cited by URL (web pages, not registry works)")
+        lines.append("")
+        for c in web:
+            title = c.get("cited_title") or c.get("title") or ""
+            named = f" *{title}*," if title else ""
+            claim = c.get("claim_context") or ""
+            tail = f" Submission claim context: \"{claim}\"" if claim else ""
+            lines.append(f"- **{_short_label(c)}** — WEB SOURCE.{named} {c.get('resolved_id')}.{tail}")
         lines.append("")
 
     if unverifiable:
@@ -1111,7 +1204,10 @@ def _short_label(c: dict) -> str:
         else:
             base = f"{authors[0]} et al."
         if year:
-            return f"{base} {year}"
+            # "2019a" / "2019b": two works by the same authors in one year
+            # must not share a label in the report.
+            m = re.search(rf"\b{year}([a-z])\b", c.get("raw") or "")
+            return f"{base} {year}{m.group(1) if m else ''}"
         return base
     if c.get("title"):
         t = c["title"]
@@ -1141,6 +1237,8 @@ def save_citation_report(record_id: str, citations: list[dict], report: str) -> 
         "citation_count": len(citations),
         "verified_count": sum(1 for c in citations if c.get("verified")),
         "unverifiable_count": sum(1 for c in citations if not c.get("verified")),
+        "confirmed_count": sum(1 for c in citations if is_identity_confirmed(c)),
+        "unconfirmed_count": sum(1 for c in citations if is_unconfirmed_match(c)),
         "citations": citations,
     }
     with open(json_path, "w") as f:

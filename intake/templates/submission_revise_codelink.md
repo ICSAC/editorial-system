@@ -4,7 +4,7 @@ Subject: ICSAC submission — revise and resubmit — {{icsac_submission_id}}
 
 Thank you for submitting your manuscript to the Institute for Complexity Science and Advanced Computing.
 
-**Submission ID:** {{icsac_submission_id}}
+**Submission ID:** {{icsac_submission_id}}{{revision_line}}
 **Title:** {{title}}
 **Decision:** Revise and resubmit
 

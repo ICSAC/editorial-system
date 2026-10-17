@@ -69,8 +69,12 @@ def _markdown_to_html(md: str) -> str:
 
     The templates carry no raw HTML, so every `<` in the body came from a
     substituted value (a title, a name, a note). It is rendered as text, not
-    as a tag (audit 2026-09-29); the plain-text part is untouched."""
-    inner = markdown.markdown(md.replace("<", "&lt;"), extensions=["extra", "sane_lists"])
+    as a tag (audit 2026-09-29); the plain-text part is untouched.
+
+    A single line break is a line break (nl2br): every one in the templates
+    is meant (the header block, the sign-off), and without it the header
+    read as one run-on line in the HTML part (2026-10-16)."""
+    inner = markdown.markdown(md.replace("<", "&lt;"), extensions=["extra", "sane_lists", "nl2br"])
     inner = _box_response_section(inner)
     return HTML_WRAPPER.format(logo=LOGO_URL, body=inner)
 

@@ -96,6 +96,10 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 # different model on the same provider absorbs it. Same trade-off as 04-27:
 # a fallback can duplicate another slot's primary; reliability beats diversity.
 OPENROUTER_MODELS = [
+    # 2026-10-02: no entry may route a manuscript to a provider that trains on
+    # prompts. OpenRouter lists its free nemotron routes as training ones, so
+    # they are out. The OR free routes kept here are listed as not training;
+    # Workers AI does not train; the HF upstreams' own terms are still to check.
     # 2026-09-28 (the curator): a free direct provider first wherever one exists, the
     # HF router second (a $0.10/month credit pool), OpenRouter :free last (a shared
     # pool that 429s). `oai|<provider>|<model>` entries need the provider's key in
@@ -105,37 +109,40 @@ OPENROUTER_MODELS = [
     # Slot 1: DeepSeek family.
     [
         "oai|sambanova|DeepSeek-V3.1",
-        "hf|deepseek-ai/DeepSeek-V4-Flash:deepinfra",
-        "hf|zai-org/GLM-4.7-Flash:deepinfra",
-        "or|nvidia/nemotron-3-ultra-550b-a55b:free",
-        "or|qwen/qwen3.8-27b:free",
+        # 2026-10-12: HF's deepinfra route stopped serving DeepSeek-V4-Flash and
+        # GLM-4.7-Flash. GLM-4.7-Flash now comes from Workers AI. Workers AI's own
+        # DeepSeek-V4-Flash is left out: on a full panel prompt it spent its whole
+        # output on hidden reasoning, and one call cost ~2,600 of the daily neurons
+        # the gpt-oss slot also draws on.
+        "oai|cloudflare|@cf/zai-org/glm-4.7-flash",
         "or|google/gemma-4-31b-it:free",
     ],
-    # Slot 2: OpenAI open-weights.
+    # Slot 2: OpenAI open-weights. Workers AI first (2026-10-02): free within
+    # the daily allocation, metered by review._neuron_reserve, and it does not
+    # train on customer content.
     [
+        "oai|cloudflare|@cf/openai/gpt-oss-120b",
         "oai|sambanova|gpt-oss-120b",
         "hf|openai/gpt-oss-120b:deepinfra",
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
-        "or|nvidia/nemotron-3-super-120b-a12b:free",
-        "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-26b-a4b-it:free",
     ],
-    # Slot 3: Mistral / Qwen family (Mistral activates when MISTRAL_API_KEY exists).
+    # Slot 3: Mistral / Qwen family (Mistral activates when MISTRAL_API_KEY exists;
+    # medium, not large: the key's model list has no large model, 2026-10-02).
     [
-        "oai|mistral|mistral-large-latest",
+        "oai|mistral|mistral-medium-latest",
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
         "hf|google/gemma-4-31B-it:deepinfra",
-        "or|nvidia/nemotron-3-ultra-550b-a55b:free",
         "or|google/gemma-4-26b-a4b-it:free",
         "or|google/gemma-4-31b-it:free",
     ],
-    # Slot 4: Google family.
+    # Slot 4: Google family. Workers AI first (2026-10-12): free within the
+    # daily allocation, no training on customer content.
     [
+        "oai|cloudflare|@cf/google/gemma-4-26b-a4b-it",
         "hf|google/gemma-4-31B-it:deepinfra",
         "or|google/gemma-4-31b-it:free",
         "oai|sambanova|gemma-4-31B-it",
-        "or|nvidia/nemotron-3-super-120b-a12b:free",
-        "or|qwen/qwen3.8-27b:free",
         "or|google/gemma-4-26b-a4b-it:free",
     ],
 ]
@@ -154,10 +161,57 @@ OPENROUTER_MODELS_API_URL = "https://openrouter.ai/api/v1/models"
 # (2026-09-28). Keys come from the environment; an entry whose key is absent is
 # skipped, not counted as a dead chain link.
 OAI_COMPAT_PROVIDERS = {
-    # free tier, no card: about 20 requests and 200K tokens per day, 128k context
+    # no longer free (checked 2026-10-02: a payment method and purchased credits
+    # are required); its entries stay inert while no key is set
     "sambanova": {"base_url": "https://api.sambanova.ai/v1", "key_env": "SAMBANOVA_API_KEY"},
-    # free "experiment" mode; its limits are shown only in the Mistral admin panel
-    "mistral":   {"base_url": "https://api.mistral.ai/v1",   "key_env": "MISTRAL_API_KEY"},
+    # A card-backed account (2026-10-02) with a monthly allowance that must never
+    # be exceeded, and training on inputs switched off in the account. Every call
+    # is metered against monthly_cap_usd (ICSAC_MISTRAL_MONTHLY_CAP_USD, default
+    # 8) before it is sent. usd_rates are deliberately ABOVE the list price
+    # (mistral-medium-latest = Medium 3.5, listed at $1.5 / $7.5 per million
+    # input / output tokens), so the ledger over-counts and a price rise stays
+    # inside the margin; a model with no rate here is refused.
+    "mistral": {
+        "base_url": "https://api.mistral.ai/v1",
+        "key_env": "MISTRAL_API_KEY",
+        "monthly_cap_usd": float(os.environ.get("ICSAC_MISTRAL_MONTHLY_CAP_USD", "8")),
+        "usd_rates": {
+            "mistral-medium-latest": (2.0, 10.0),
+        },
+    },
+    # Cloudflare Workers AI (2026-10-02): a free daily allocation of 10,000
+    # neurons per account, and customer content is not used for training. On a
+    # Workers Paid account usage past the allocation is billed, so every call is
+    # metered against daily_neuron_cap before it is sent and refused when it
+    # could cross it (review._neuron_reserve). Rates are neurons per million
+    # input / output tokens from the Workers AI pricing page; a model with no
+    # rate here is refused.
+    "cloudflare": {
+        "base_url": ("https://api.cloudflare.com/client/v4/accounts/"
+                     + os.environ.get("CLOUDFLARE_AI_ACCOUNT_ID", "") + "/ai/v1"),
+        "key_env": "CLOUDFLARE_AI_TOKEN",
+        "daily_neuron_cap": int(os.environ.get("ICSAC_CF_NEURON_CAP", "9000")),
+        "neuron_rates": {
+            "@cf/openai/gpt-oss-120b": (31818, 68182),
+            "@cf/meta/llama-4-scout-17b-16e-instruct": (24545, 77273),
+            "@cf/mistralai/mistral-small-3.1-24b-instruct": (31876, 50488),
+            "@cf/google/gemma-3-12b-it": (31371, 50560),
+            "@cf/zai-org/glm-4.7-flash": (5500, 36364),
+            "@cf/google/gemma-4-26b-a4b-it": (9091, 27273),
+        },
+        # Request overrides per model (default: max_tokens 4000, no JSON mode).
+        # Workers AI counts a reasoning model's hidden reasoning inside
+        # max_tokens: at 4000 both of these cut their review JSON off mid-object
+        # on a full-length panel prompt. Without JSON mode both wrote LaTeX
+        # backslash commands unescaped inside JSON strings, which no parser accepts.
+        # In JSON mode Gemma spent all 16000 tokens reasoning and returned no
+        # content, so its thinking is off. Measured 2026-10-12.
+        "model_params": {
+            "@cf/zai-org/glm-4.7-flash": {"max_tokens": 16000, "response_format": {"type": "json_object"}},
+            "@cf/google/gemma-4-26b-a4b-it": {"max_tokens": 8000, "response_format": {"type": "json_object"},
+                                              "chat_template_kwargs": {"enable_thinking": False}},
+        },
+    },
 }
 # panel_retry.py (batch-tick step 2b): a paper the panel could not staff is
 # re-queued every tick and SCREAMS (Telegram + pain) after this many hours of

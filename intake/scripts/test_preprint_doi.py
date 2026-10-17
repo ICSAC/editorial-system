@@ -177,7 +177,7 @@ try:
     import crossref_deposit as cd
     check(cd.preprint_doi(up_rec) == "10.20944/preprints202607.0102.v1", "the pipeline reads the upload route's preprint")
     sub = dict(up_rec, sub_id="ICSAC-SUB-00099")
-    xml = cd.build_deposit_xml(sub, doi="10.67697/icsac.2026.099", landing_url="https://icsacinstitute.org/publications/t",
+    xml = cd.build_deposit_xml(sub, doi="10.5555/icsac.2026.099", landing_url="https://icsacinstitute.org/publications/t",
                                pdf_url=None, content_type="journal-article")
     cd.validate_xml(xml)
     check(b'relationship-type="hasPreprint"' in xml and b"10.20944/preprints202607.0102.v1" in xml,

@@ -139,7 +139,11 @@ def select_load_bearing(citations: list[dict], full_text: str, max_n: int = 10) 
     """
     if not citations:
         return []
-    eligible = [c for c in citations if c.get("verified")]
+    # Only a reference whose identity is confirmed by its own identifier can be
+    # judged against the claim: a text-search match may be another work, and a
+    # verdict on it would be a verdict on the wrong paper.
+    import citation_verify
+    eligible = [c for c in citations if citation_verify.is_identity_confirmed(c)]
     if not eligible:
         return []
     if len(eligible) <= max_n:
@@ -529,7 +533,10 @@ def _short_label(c: dict) -> str:
         else:
             base = f"{authors[0]} et al."
         if year:
-            return f"{base} {year}"
+            # "2019a" / "2019b": two works by the same authors in one year
+            # must not share a label in the report.
+            m = re.search(rf"\b{year}([a-z])\b", c.get("raw") or "")
+            return f"{base} {year}{m.group(1) if m else ''}"
         return base
     if c.get("title"):
         t = c["title"]

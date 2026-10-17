@@ -207,12 +207,14 @@ def build_evidence_block(record_id: str, reviews_dir: str | None = None,
             cits = payload.get("citations") or []
             n = len(cits)
             confirmed = [c for c in cits if c.get("verified") and c.get("confidence") == "exact-id"]
-            matched = [c for c in cits if c.get("verified") and c.get("confidence") != "exact-id"]
+            matched = [c for c in cits if c.get("verified") and c.get("confidence") not in ("exact-id", "web-source")]
             disagree = [c for c in cits if not c.get("verified") and c.get("doi_identity") in ("mismatch", "dead")]
-            unver = [c for c in cits if not c.get("verified") and c not in disagree]
+            web = [c for c in cits if c.get("confidence") == "web-source"]
+            unver = [c for c in cits if not c.get("verified") and c not in disagree and c not in web]
             lines = [f"CITATION VERIFICATION: {n} references; {len(confirmed)} CONFIRMED by identifier, "
-                     f"{len(matched)} MATCHED by text only, {len(disagree)} with a DOI that disagrees "
-                     f"(mismatch or dead), {len(unver)} UNVERIFIABLE."]
+                     f"{len(matched)} UNCONFIRMED (no identifier cited; not evidence), {len(disagree)} with a DOI that disagrees "
+                     f"(mismatch or dead), {len(unver)} UNVERIFIABLE, {len(web)} WEB SOURCE (cited by URL, "
+                     f"not a registry work; nothing matched to it)."]
             def _label(c):
                 a = c.get("authors") or []
                 base = (a[0] if len(a) == 1 else f"{a[0]} et al." if a else (c.get("cited_title") or c.get("title") or c.get("raw") or "")[:50])
@@ -225,8 +227,10 @@ def build_evidence_block(record_id: str, reviews_dir: str | None = None,
                        else None) or c.get("reason") or ""
                 lines.append(f"- {_label(c)} — UNVERIFIABLE: {why[:160]}")
             for c in matched:
-                lines.append(f"- {_label(c)} — MATCHED by text [{c.get('confidence')}], identity not confirmed")
-            if not disagree and not unver and not matched:
+                lines.append(f"- {_label(c)} — UNCONFIRMED: no identifier cited; not evidence of anything")
+            for c in web:
+                lines.append(f"- {_label(c)} — WEB SOURCE: {c.get('resolved_id') or ''}")
+            if not disagree and not unver and not matched and not web:
                 lines.append("- every reference was confirmed by its identifier")
             parts.append("\n".join(lines))
         except Exception as exc:

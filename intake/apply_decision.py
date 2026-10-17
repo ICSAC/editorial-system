@@ -466,6 +466,7 @@ def main(argv: list[str]) -> int:
         code_link_claims=code_link_claims, preprint_doi=preprint or "",
         exclusivity_confirmed=form.get("exclusivity_acknowledged") is True,
         curator_findings=curator_findings,
+        revision_of=state_pre.get("revision_of") or "",
     )
     if ok:
         # Decision emails go to Gmail Drafts (curator-applied decision path).

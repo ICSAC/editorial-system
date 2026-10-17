@@ -328,7 +328,7 @@ def _extract_registry_entry(record_id: str, metadata: dict,
             last, after = [s.strip() for s in name.split(",", 1)]
             name = f"{after} {last}".strip() if after else last
         authors.append(name)
-    return {
+    proto = {
         "record_id": str(record_id),
         "title": m.get("title", "Untitled"),
         "authors": authors or ["Unknown"],
@@ -337,6 +337,10 @@ def _extract_registry_entry(record_id: str, metadata: dict,
         "source": source,
         "source_ref": f"https://zenodo.org/records/{record_id}",
     }
+    kw = publications.clean_keywords(m.get("keywords"))
+    if kw:
+        proto["keywords"] = kw
+    return proto
 
 
 def _publish_public_review(record_id: str) -> str | None:

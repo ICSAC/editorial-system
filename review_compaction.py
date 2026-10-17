@@ -399,7 +399,24 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
     return text, manifest, match_failures
 
 
-def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
+def identity_in_text(text: str, known_identity: dict | None) -> list[str]:
+    """Which of the submission's own identifiers occur in the text.
+    known_identity = {"names": [...], "other": [...]}: a name matches by any of
+    its words of three letters or more; ORCID iDs, emails and affiliations
+    ("other") match whole. Deterministic; over-matching only makes compaction
+    stricter."""
+    t = (text or "").lower()
+    hits: list[str] = []
+    known_identity = known_identity or {}
+    candidates = [p for n in known_identity.get("names") or [] for p in re.split(r"[\s,.]+", str(n)) if len(p) >= 3]
+    candidates += [str(v).strip() for v in known_identity.get("other") or [] if str(v).strip()]
+    for p in candidates:
+        if re.search(r"(?<![a-z0-9])" + re.escape(p.lower()) + r"(?![a-z0-9])", t):
+            hits.append(p)
+    return hits
+
+
+def compact_paper(paper_text: str, *, log=None, known_identity: dict | None = None) -> tuple[str, dict]:
     """Strip author/identifier metadata from a manuscript for blind review.
 
     Returns (redacted_text, manifest). FAIL CLOSED: on any failure path the
@@ -408,6 +425,12 @@ def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
     a "_failure" manifest as a hard stop — withhold the paper from the panel
     and pause the submission — so author identity can never leak into a
     "blind" review. Compaction failure BLOCKS the paper.
+
+    known_identity: the submission's own names, ORCID iDs, emails and
+    affiliations. When the extraction finds no author spans, the paper goes on
+    ONLY if none of these occurs anywhere in the text (a manuscript anonymized
+    at submission); without them, or with any of them in the text, it fails
+    closed as before.
     """
     def _log(msg: str) -> None:
         if log:
@@ -451,17 +474,28 @@ def compact_paper(paper_text: str, *, log=None) -> tuple[str, dict]:
         manifest["_failure"] = "claude output unparseable"
         return "", manifest
 
+    anonymized = False
     if not isinstance(spans, dict) or not any(
             spans.get(k) for k in ("author_names", "affiliations", "emails", "orcids")):
         # The extraction identified no author spans at all: the panel would read
-        # an un-blinded manuscript. FAIL CLOSED (audit 2026-09-28 item 2).
-        _log("  compaction: extraction identified no author spans; FAILING CLOSED "
-             "(paper withheld from panel)")
-        manifest = dict(_EMPTY_MANIFEST)
-        manifest["_failure"] = "no identity spans identified"
-        return "", manifest
+        # an un-blinded manuscript. FAIL CLOSED (audit 2026-09-28 item 2) --
+        # unless the submission's own identifiers are known and none of them
+        # occurs in the text, i.e. the author anonymized the manuscript.
+        found = identity_in_text(paper_text, known_identity)
+        if not isinstance(spans, dict) or not (known_identity or {}).get("names") or found:
+            why = (f"; the text carries {len(found)} of the submission's own identifiers" if found else "")
+            _log("  compaction: extraction identified no author spans" + why +
+                 "; FAILING CLOSED (paper withheld from panel)")
+            manifest = dict(_EMPTY_MANIFEST)
+            manifest["_failure"] = "no identity spans identified"
+            return "", manifest
+        _log("  compaction: no author spans, and none of the submission's names, ORCID iDs, "
+             "emails or affiliations occurs in the text: anonymized at submission")
+        anonymized = True
 
     redacted, manifest, match_failures = _apply_removals(paper_text, spans)
+    if anonymized:
+        manifest["anonymized_at_submission"] = True
 
     identity_failures = [f for f in match_failures
                          if f.get("category") in ("author_names", "emails", "orcids")]
@@ -513,11 +547,16 @@ def render_manifest(manifest: dict) -> str:
     if manifest.get("funding_statements"):
         lines.append(f"  - Funding statements: {len(manifest['funding_statements'])} item(s)")
     if manifest.get("references_count") or manifest.get("references_section_chars"):
+        # No entry count: the count is a heuristic (blank-line blocks for
+        # author-year lists), and PDF text puts no blank lines between entries,
+        # so a full list read as one or two items in the author's letter.
         lines.append(
-            f"  - References list: {manifest.get('references_count', 0)} item(s) "
-            f"({manifest.get('references_section_chars', 0)} characters)"
+            f"  - References list ({manifest.get('references_section_chars', 0)} characters)"
         )
 
+    if manifest.get("anonymized_at_submission"):
+        lines.insert(0, "  - Nothing identifying: the manuscript was anonymized at submission (none of the "
+                        "submission's names, ORCID iDs, emails or affiliations appears in it)")
     if not lines:
         lines.append("  (No identifying content detected to remove.)")
 

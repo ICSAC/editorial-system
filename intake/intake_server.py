@@ -933,7 +933,9 @@ async def handle_test_pipeline_submission(
     if has_doi:
         title = "(deferred — resolving from DOI)"
         abstract = ""
-        keywords: list = []
+        # Optional on the DOI route (2026-10-02): the author's own keywords;
+        # left empty, the worker takes the source record's.
+        keywords: list = [k.strip() for k in re.split(r"[,;]+", str(form.get("keywords") or "")) if k.strip()]
         license_id = article_license or ""
         creators = [{"name": submitter["name"], "orcid": token}]
         publication_date = _now_iso()[:10]
@@ -1360,7 +1362,9 @@ async def api_submit(request: Request):
         # the deposit step is upload-only.
         title = "(deferred — resolving from DOI)"
         abstract = ""
-        keywords: list = []
+        # Optional on the DOI route (2026-10-02): the author's own keywords;
+        # left empty, the worker takes the source record's.
+        keywords: list = [k.strip() for k in re.split(r"[,;]+", str(form.get("keywords") or "")) if k.strip()]
         license_id = article_license or ""
         creators = [{"name": submitter["name"], "orcid": submitter["orcid"]}]
         publication_date = _now_iso()[:10]

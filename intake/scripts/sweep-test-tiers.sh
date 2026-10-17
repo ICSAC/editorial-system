@@ -4,8 +4,8 @@
 # LEAVES audit-log-test.jsonl untouched (durable history) and queue/
 # untouched (active state).
 #
-# Wired to cron on OPi3B: Sunday 04:00 ET.
-# Pain nerve: failure curls /pain on OPi5 so a broken sweep doesn't go silent.
+# Runs weekly from cron. On failure it posts to the monitoring endpoint,
+# so a broken sweep doesn't go silent.
 set -u
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 TEST_ROOT="${HOME}/icsac-submissions/test"

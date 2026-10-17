@@ -36,7 +36,7 @@ try:
     check(not list(seq_file.parent.glob(".doi-seq.tmp-*")), "counter: no temp file left behind")
     seq_file.unlink()
     d = tmp / "subs" / "ICSAC-SUB-00042" / "crossref"; d.mkdir(parents=True)
-    (d / "doi.json").write_text(json.dumps({"doi": "10.67697/icsac.2026.005"}))
+    (d / "doi.json").write_text(json.dumps({"doi": "10.5555/icsac.2026.005"}))
     check(cd._next_seq(seq_file, 2026) == 6, "counter: a lost file resumes above the highest doi.json suffix")
     check(cd._next_seq(seq_file, 2027) == 1, "counter: another year starts at 1")
     seq_file.write_text("{not json")
@@ -51,11 +51,11 @@ try:
         sub = tmp / "subs" / "ICSAC-SUB-00099"; (sub / "crossref").mkdir(parents=True)
         shutil.copyfile(src, sub / "submission.json")
         (sub / "crossref" / "staged.json").write_text(json.dumps(
-            {"doi": "10.67697/icsac.2026.099", "checkpoints": {"crossref_batch_id": "b1", "crossref_deposited_at": "x"}}))
-        cd.stage(sub, doi="10.67697/icsac.2026.099", log=lambda m: None)
+            {"doi": "10.5555/icsac.2026.099", "checkpoints": {"crossref_batch_id": "b1", "crossref_deposited_at": "x"}}))
+        cd.stage(sub, doi="10.5555/icsac.2026.099", log=lambda m: None)
         st = json.loads((sub / "crossref" / "staged.json").read_text())
         check(st.get("checkpoints", {}).get("crossref_batch_id") == "b1", "stage: an in-flight batch id survives a re-stage")
-        check(st.get("doi") == "10.67697/icsac.2026.099" and (sub / "crossref" / "deposit.xml").exists(), "stage: XML + record written")
+        check(st.get("doi") == "10.5555/icsac.2026.099" and (sub / "crossref" / "deposit.xml").exists(), "stage: XML + record written")
     else:
         print("  skip stage() check (no SUB-00008 submission.json on this host)")
 
@@ -74,7 +74,7 @@ try:
     check(out.get("sub_id") == "ICSAC-SUB-00001" and out.get("ssrn_id") == "123"
           and out.get("license_url", "").endswith("by/4.0/"), "registry: an update keeps sub_id, ssrn_id, licence")
     check(out.get("promotion_opt_out") is True, "registry: an update takes the new exclusion")
-    new = pub.upsert_entry(approved=True, proto={"title": "New paper", "authors": ["B. Author"], "doi": "10.67697/icsac.2026.007",
+    new = pub.upsert_entry(approved=True, proto={"title": "New paper", "authors": ["B. Author"], "doi": "10.5555/icsac.2026.007",
                             "source": "submission-pdf", "sub_id": "ICSAC-SUB-00007",
                             "license_url": "https://creativecommons.org/licenses/by/4.0/",
                             "promotion_exclusions": ["social"], "persistence_opt_out": True})

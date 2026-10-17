@@ -390,15 +390,16 @@ def _doi_data(parent: ET.Element, doi: str, landing: str, pdf_url: Optional[str]
 
 
 def _citations(parent: ET.Element, citations: list[dict]) -> None:
-    """Verified DOIs go in as <doi>; the rest as unstructured text. Crossref
-    matches unstructured citations itself, so nothing verifiable is lost."""
+    """DOIs confirmed by the verifier (the cited DOI resolves to the cited work)
+    go in as <doi>; the rest as unstructured text. Crossref matches unstructured
+    citations itself, so nothing verifiable is lost."""
     if not citations:
         return
     cl = _sub(parent, "citation_list")
     for i, c in enumerate(citations, 1):
         cit = _sub(cl, "citation", attrib={"key": f"ref{i}"})
         doi = (c.get("doi") or "").strip()
-        if doi and c.get("verified"):
+        if doi and c.get("verified") and c.get("confidence") == "exact-id":
             _sub(cit, "doi", doi)
         else:
             raw = " ".join((c.get("raw") or c.get("title") or "").split())
@@ -1004,6 +1005,9 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     cdu = publications.code_data_url(submission)
     if cdu:
         proto["code_data_url"] = cdu
+    kw = publications.clean_keywords(submission.get("keywords"))
+    if kw:
+        proto["keywords"] = kw
     pre = preprint_doi(submission)
     if pre:
         proto["preprint_doi"] = pre   # the paper page links the preprint it was submitted from

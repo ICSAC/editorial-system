@@ -142,7 +142,7 @@ try:
     sub3 = tmp / "ICSAC-SUB-00096"
     (sub3 / "crossref").mkdir(parents=True)
     (sub3 / "crossref" / "deposit.xml").write_bytes(b"<x/>")
-    (sub3 / "crossref" / "staged.json").write_text(json.dumps({"doi": "10.67697/icsac.2026.999"}))
+    (sub3 / "crossref" / "staged.json").write_text(json.dumps({"doi": "10.5555/icsac.2026.999"}))
     (sub3 / "submission.json").write_text(json.dumps({"title": "T"}))
     (sub3 / "state.json").write_text(json.dumps({"state": "completed_email_failed", "decision": "accept"}))
     os.environ.pop("ICSAC_REGISTER_WITHOUT_NOTICE", None)

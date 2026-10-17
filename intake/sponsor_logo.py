@@ -45,9 +45,8 @@ from fastapi import HTTPException, Request, UploadFile
 # sessions whose subscription items don't reference this product.
 SPONSOR_PRODUCT_ID = "prod_UXiXkUln7XbrQz"
 
-# Website repo on this host. The intake server runs as `orangepi`; the
-# repo's SSH remote uses the github.com-3rwt alias which already has
-# the dedicated push key.
+# Website repo checkout on the intake host. Its SSH remote uses a host
+# alias that already carries a dedicated push key.
 WEBSITE_REPO = Path.home() / "Desktop" / "icsac" / "icsacinstitute.org"
 LOGO_DIR = WEBSITE_REPO / "public" / "supporter-logos"
 SUPPORTERS_YAML = WEBSITE_REPO / "src" / "data" / "supporters.yaml"

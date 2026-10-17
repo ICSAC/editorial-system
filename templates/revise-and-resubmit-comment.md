@@ -10,7 +10,7 @@ Your submission **{{paper_title}}** has been returned with a **revise-and-resubm
 
 ## Resubmitting
 
-When you are ready, you may resubmit a revised version through [icsacinstitute.org/submit](https://icsacinstitute.org/submit). Resubmissions are reviewed fresh by a new panel — a prior R&R does not bias future evaluation, and there is no limit on the number of revision rounds.
+When you are ready, you may resubmit a revised version through [icsacinstitute.org/submit](https://icsacinstitute.org/submit). Resubmissions get a fresh panel run — a prior R&R does not bias future evaluation, and there is no limit on the number of revision rounds.
 
 If you think a point above is mistaken, leave the paper as it was on that point and say so in an email to help@icsacinstitute.org with the link to your Zenodo record. The curation team reads every such message, and a point we got wrong is withdrawn.
 

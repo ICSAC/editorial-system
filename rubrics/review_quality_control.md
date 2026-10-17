@@ -69,13 +69,13 @@ Scoring:
 
 ### 5. evidence_use (public)
 
-The panel is given the citation verification block (its legend above the instructions, its per-reference results inside the submission block) (every reference marked CONFIRMED, MATCHED, DOI MISMATCH, DOI DEAD or UNVERIFIABLE, with the reason) and the code package digest (the shipped code's file list, definitions and the lines defining the paper's named constructs). The auditor is given the same, condensed. Did the slot act on it?
+The panel is given the citation verification block (its legend above the instructions, its per-reference results inside the submission block) (every reference marked CONFIRMED, UNCONFIRMED, DOI MISMATCH, DOI DEAD, WEB SOURCE or UNVERIFIABLE, with the reason) and the code package digest (the shipped code's file list, definitions and the lines defining the paper's named constructs). The auditor is given the same, condensed. Did the slot act on it?
 
 - **5** — Every claim the slot makes about references or code is anchored in the block: mismatched and dead DOIs are named under citation integrity; claims about what the code computes cite a file and line from the digest; anything the block cannot support is called unverified.
 - **4** — Uses the block where it matters and contradicts nothing in it; one claim about references or code is loose.
 - **3** — Uses part of the block: names the DOI findings but calls the analysis "reproducible" without the digest, or the reverse.
 - **2** — Ignores the block: scores citation integrity or methodological transparency as if no verification existed.
-- **1** — Contradicts the block: "citations verified" against DOI MISMATCH or DOI DEAD lines; "implements the measure as described" when the digest shows a different definition; cites the digest for something it does not contain.
+- **1** — Contradicts the block: "citations verified" against DOI MISMATCH or DOI DEAD lines; "implements the measure as described" when the digest shows a different definition; cites the digest for something it does not contain; treats an UNCONFIRMED reference as a finding (misattributed, stuffed, fabricated) or as verified.
 
 When the block says no evidence was supplied (no verification, no digest), score on whether the slot avoided asserting verification it could not have performed.
 

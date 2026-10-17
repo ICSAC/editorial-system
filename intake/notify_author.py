@@ -375,6 +375,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   preprint_doi: str = "",
                   exclusivity_confirmed: bool = False,
                   curator_findings: str = "",
+                  revision_of: str = "",
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -384,6 +385,11 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
     "the panel found issues" (false whenever the panel
     recommended and the curator decided otherwise). Empty renders a loud bracket so
     the draft cannot go out without it.
+
+    `revision_of` is the earlier submission ID this paper revises, as the state
+    records it (only a link verified under the same ORCID is recorded). The
+    letter's header names it, so the author can tie this decision to the earlier
+    letter; empty for a first submission.
 
     verdict ∈ {accept, revise, scope_reject}; source ∈ {doi, upload}. Per-source
     template variants live in templates/submission_<verdict>_<source>.md.
@@ -466,6 +472,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
 
     subject, body = _render(template, {
         "icsac_submission_id": sub_id,
+        "revision_line": f"\n**Revision of:** {revision_of}" if revision_of else "",
         "title": title, "author_name": author_name,
         "source_ref": source_ref or "",
         "deposit_doi": deposit_doi or "",

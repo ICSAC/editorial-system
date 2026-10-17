@@ -248,16 +248,16 @@ def main() -> int:
     real_send_followup(sub_id="ICSAC-SUB-TEST-1", tier=3, **common)
     real_send_followup(sub_id="ICSAC-SUB-TEST-1", tier=1, **common)          # a test id can never go out plain
     na.send_published(to="a@example.com", sub_id="ICSAC-SUB-00001", title="T", author_name="A",
-                      deposit_doi="10.67697/icsac.2026.001", deposit_url="https://doi.org/x",
+                      deposit_doi="10.5555/icsac.2026.001", deposit_url="https://doi.org/x",
                       publications_url="https://icsacinstitute.org/publications/x", stay_involved=True)
     na.send_published(to="a@example.com", sub_id="ICSAC-SUB-00001", title="T", author_name="A",
-                      deposit_doi="10.67697/icsac.2026.001", deposit_url="https://doi.org/x",
+                      deposit_doi="10.5555/icsac.2026.001", deposit_url="https://doi.org/x",
                       publications_url="https://icsacinstitute.org/publications/x", stay_involved=False)
     na.send_published(to="a@example.com", sub_id="ICSAC-SUB-TEST-1", title="T", author_name="A",
-                      deposit_doi="10.67697/TEST.x", deposit_url="https://doi.org/x",
+                      deposit_doi="10.5555/TEST.x", deposit_url="https://doi.org/x",
                       publications_url="https://icsacinstitute.org/publications/x", tier=3)
     na.send_published(to="a@example.com", sub_id="ICSAC-SUB-TEST-1", title="T", author_name="A",
-                      deposit_doi="10.67697/TEST.x", deposit_url="https://doi.org/x",
+                      deposit_doi="10.5555/TEST.x", deposit_url="https://doi.org/x",
                       publications_url="https://icsacinstitute.org/publications/x")            # tier omitted
     check(len(sent) == 8, f"eight renders reached the transport ({len(sent)})")
     check(all(not k.get("send") for k in sent), "no render ever asks the transport to SEND")

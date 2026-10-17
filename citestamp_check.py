@@ -137,7 +137,13 @@ def check_citations(citations: list[dict], *, log=print) -> dict:
         return out
     out["available"] = True
     rpc_id = 10
+    import citation_verify
     for c in citations:
+        # Only identity-confirmed references: a DOI that points to another work,
+        # or a record found by text search, would put that other work's
+        # refutations and supports in front of the panel.
+        if not citation_verify.is_identity_confirmed(c):
+            continue
         doi = _doi_of(c)
         if not doi:
             continue

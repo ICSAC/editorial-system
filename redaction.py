@@ -36,6 +36,7 @@ FORBIDDEN_VENDOR_TOKENS: tuple[str, ...] = (
     # direct-provider labels from `oai|` panel entries (2026-09-28)
     "sambanova",
     "deepinfra",
+    "@cf/",
     "mistral-large",
     "mistral-medium",
     "anthropic",

@@ -33,7 +33,7 @@ ZEN = "https://doi.org/10.5281/zenodo.23042786"
 
 
 def build(sub: dict, content_type: str = "journal-article") -> str:
-    xml = cd.build_deposit_xml(sub, doi="10.67697/icsac.2026.099",
+    xml = cd.build_deposit_xml(sub, doi="10.5555/icsac.2026.099",
                                landing_url="https://icsacinstitute.org/publications/a-test-paper",
                                pdf_url="https://icsacinstitute.org/papers/ICSAC-SUB-00099.pdf",
                                content_type=content_type)
@@ -95,12 +95,12 @@ try:
     x = build(dict(BASE))
     jm = x[x.find("<journal_metadata"):x.find("</journal_metadata>")]
     check(bool(x) and "<doi_data" not in jm, "unset: journal_metadata carries no doi_data (the deposit as before)")
-    config.CROSSREF_JOURNAL_DOI = "10.67697/persistence"
+    config.CROSSREF_JOURNAL_DOI = "10.5555/persistence"
     x = build(dict(BASE, code_data={"available": True, "url": ZEN}))
     jm = x[x.find("<journal_metadata"):x.find("</journal_metadata>")]
-    check(bool(x) and "<doi>10.67697/persistence</doi>" in jm and "<resource>https://icsacinstitute.org/journal/</resource>" in jm,
+    check(bool(x) and "<doi>10.5555/persistence</doi>" in jm and "<resource>https://icsacinstitute.org/journal/</resource>" in jm,
           "set: journal_metadata carries the title DOI and the journal page, and validates")
-    check(x.count("<doi>10.67697/icsac.2026.099</doi>") == 1, "the article keeps its own DOI")
+    check(x.count("<doi>10.5555/icsac.2026.099</doi>") == 1, "the article keeps its own DOI")
 finally:
     if saved is None:
         delattr(config, "CROSSREF_JOURNAL_DOI") if hasattr(config, "CROSSREF_JOURNAL_DOI") else None
@@ -110,14 +110,14 @@ finally:
 print("4. the Zenodo archive copy follows the Crossref record")
 import repository_deposit as rd  # noqa: E402
 sub = dict(BASE, resource_type="preprint", publication_date="2026-09-29")
-md = rd._build_metadata(sub, external_doi="10.67697/icsac.2026.099")
+md = rd._build_metadata(sub, external_doi="10.5555/icsac.2026.099")
 check(md.get("upload_type") == "publication" and md.get("publication_type") == "article",
       "with an ICSAC DOI, a form 'preprint' becomes a journal article")
 check(md.get("journal_title") == getattr(config, "CROSSREF_JOURNAL_TITLE", "Persistence")
       and md.get("journal_volume") == str(getattr(config, "CROSSREF_JOURNAL_VOLUME", "1")),
       "it names the journal and the volume from config")
-check(md.get("doi") == "10.67697/icsac.2026.099", "the external DOI still rides on the draft")
-md = rd._build_metadata(dict(sub, resource_type="dataset"), external_doi="10.67697/icsac.2026.099")
+check(md.get("doi") == "10.5555/icsac.2026.099", "the external DOI still rides on the draft")
+md = rd._build_metadata(dict(sub, resource_type="dataset"), external_doi="10.5555/icsac.2026.099")
 check(md.get("upload_type") == "publication" and md.get("publication_type") == "article",
       "any form type is overridden once the work is an ICSAC-registered article")
 md = rd._build_metadata(sub)
@@ -126,7 +126,7 @@ check(md.get("publication_type") == "preprint" and "journal_title" not in md,
 saved_ct = getattr(config, "CROSSREF_CONTENT_TYPE", None)
 try:
     config.CROSSREF_CONTENT_TYPE = "report-paper"
-    md = rd._build_metadata(sub, external_doi="10.67697/icsac.2026.099")
+    md = rd._build_metadata(sub, external_doi="10.5555/icsac.2026.099")
     check(md.get("publication_type") == "report" and "journal_title" not in md,
           "a report-paper deployment archives a report, with no journal fields")
 finally:

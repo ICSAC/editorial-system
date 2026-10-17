@@ -4,7 +4,7 @@ Subject: ICSAC review complete — recommend — {{icsac_submission_id}}
 
 The ICSAC reviewer panel has completed its evaluation of your submission.
 
-**Submission ID:** {{icsac_submission_id}}
+**Submission ID:** {{icsac_submission_id}}{{revision_line}}
 **Title:** {{title}}
 **Decision:** Recommend for publication
 
