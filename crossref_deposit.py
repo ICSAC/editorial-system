@@ -69,6 +69,8 @@ LICENSE_URLS = {
     "cc-by-sa-4.0": "https://creativecommons.org/licenses/by-sa/4.0/",
     "cc0-1.0": "https://creativecommons.org/publicdomain/zero/1.0/",
 }
+# Adds the 1-page ICSAC cover: public/papers/<sub_id>.pdf -> <sub_id>-icsac.pdf.
+COVER_TOOL = Path(_REPO_ROOT) / "tools" / "wrap-paper-pdf.py"
 
 
 def _write_json_atomic(path, data) -> None:
@@ -743,7 +745,8 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
       1. re-stage the XML under the reserved DOI: publication_date = today and the
          landing slug re-derived -- the deposit describes registration day
       2. Crossref deposit; poll until OUR DOI reads Success   -> crossref_registered_at
-      3. /publications push (+ PDF, + public review record)    -> publications_pushed_at
+      3. /publications push (+ PDF and its ICSAC cover edition, + public review record)
+                                                               -> publications_pushed_at
       4. Zenodo archive publish (preflight: draft carries our DOI) -> zenodo_published_at
       5. author "published" notice DRAFTED to Gmail             -> author_drafted_at
       6. one curator ping that says what actually happened
@@ -865,6 +868,7 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
             _save_staged()
             state = json.loads(state_p.read_text())
         outcome["landing"] = state.get("publications_url")
+        outcome["cover"] = _cover_line(state.get("cover"), state.get("publications_slug"))
 
         # 4. Zenodo archive under the same DOI
         if not ck.get("zenodo_published_at"):
@@ -905,6 +909,7 @@ def register(sub_dir: Path, *, live: bool = False, override_window: bool = False
     # 6. the truthful ping
     _ping(f"DOI REGISTERED for {sub_dir.name}: https://doi.org/{doi}\n"
           f"Landing: {outcome.get('landing') or '(publications not configured)'}\n"
+          f"Cover page: {outcome.get('cover')}\n"
           f"Zenodo archive: {outcome.get('archive')}\n"
           f"ICSAC Zenodo community: {outcome.get('community') or 'not attempted'}\n"
           f"Author 'published' email: {outcome['author_draft']}"
@@ -976,6 +981,64 @@ def _landing(slug: str) -> str:
     return publications.publications_url(slug)
 
 
+def _deposited_dates(xml_path: Path) -> tuple[Optional[_dt.date], Optional[_dt.date]]:
+    """(acceptance_date, publication_date) exactly as deposited: the first
+    publication_date with a day is the article's (the issue's carries a year only)."""
+    def _d(el) -> Optional[_dt.date]:
+        try:
+            return _dt.date(int(el.findtext(_q("year"))), int(el.findtext(_q("month"))), int(el.findtext(_q("day"))))
+        except (TypeError, ValueError):
+            return None
+    try:
+        root = ET.parse(xml_path).getroot()
+    except (OSError, ET.ParseError):
+        return None, None
+    acc = next((d for d in map(_d, root.iter(_q("acceptance_date"))) if d), None)
+    pub = next((d for d in map(_d, root.iter(_q("publication_date"))) if d), None)
+    return acc, pub
+
+
+def _make_cover(sub_dir: Path, slug: str, *, log) -> dict:
+    """Run tools/wrap-paper-pdf.py on the PDF just copied to the website tree.
+    Returns {"file", "made_at", "path"} or {"error", "at"}; never raises."""
+    import subprocess
+    import publications
+    sub_id = sub_dir.name
+    out = Path(publications.WEBSITE_REPO) / "public" / "papers" / f"{sub_id}-icsac.pdf"
+    acc, pub = _deposited_dates(sub_dir / "crossref" / "deposit.xml")
+    cmd = [sys.executable, str(COVER_TOOL), "--slug", slug]
+    if acc:
+        cmd += ["--accepted", acc.isoformat()]
+    if pub:
+        cmd += ["--published", pub.isoformat()]
+    started = time.time()
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                           env=dict(os.environ, ICSAC_WEBSITE_REPO=publications.WEBSITE_REPO))
+        ok = r.returncode == 0 and out.exists() and out.stat().st_mtime >= started - 1
+        said = [ln for ln in (r.stderr or "").splitlines() if ln.startswith("cover not made: ")]
+        tail = (r.stderr or "").strip().splitlines()
+        why = (said[-1][len("cover not made: "):] if said else
+               f"the tool exited 0 but did not write {out.name}" if r.returncode == 0 else
+               tail[-1] if tail else f"the tool exited {r.returncode}")
+    except Exception as exc:
+        ok, why = False, f"{type(exc).__name__}: {exc}"
+    if ok:
+        log(f"  crossref: cover page made -> /papers/{out.name}")
+        return {"file": f"/papers/{out.name}", "made_at": _now_iso(), "path": str(out)}
+    log(f"  crossref: COVER NOT MADE for {sub_id}: {why[:300]}")
+    return {"error": why[:300], "at": _now_iso()}
+
+
+def _cover_line(cover: Optional[dict], slug: Optional[str]) -> str:
+    if not cover:
+        return "not recorded"
+    if cover.get("file"):
+        return f"made ({cover['file']})"
+    return (f"NOT MADE ({cover.get('error')}). The page links the bare PDF until it exists: fix, run "
+            f"tools/wrap-paper-pdf.py --slug {slug or '<slug>'}, then commit + push the website")
+
+
 def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dict:
     """Upsert /publications, copy the PDF to the website tree, stage the public
     review, push. Mirrors publish_watcher._register_published for Zenodo."""
@@ -1017,6 +1080,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
         log("  crossref: publications registry not configured; landing page NOT pushed")
         return {}
     extra = []
+    cover: dict = {}
     if publications.WEBSITE_REPO:
         pdf_src = sub_dir / "paper.pdf"
         if pdf_src.exists():
@@ -1024,6 +1088,15 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(pdf_src, dest)
             extra.append(str(dest))
+            # The ICSAC edition beside the bare file, in the same commit. A failed
+            # cover never blocks the page (it links the bare PDF until one exists),
+            # and it is never silent: it reaches the log, state.json and the ping.
+            cover = _make_cover(sub_dir, entry["slug"], log=log)
+            if cover.get("path"):
+                extra.append(cover["path"])
+        else:
+            cover = {"error": f"no paper.pdf in {sub_dir.name}, so no PDF was published", "at": _now_iso()}
+            log(f"  crossref: COVER NOT MADE for {sub_id}: {cover['error']}")
     review_md, rqc_md = publications.stage_public_review_for_slug(
         sub_id, entry["slug"], config.REVIEWS_DIR, approved=True)   # (review_key, slug, dir) -- same call as publish_watcher
     # The public review record travels in the same commit as the registry entry;
@@ -1061,6 +1134,8 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     state = json.loads(state_p.read_text()) if state_p.exists() else {}
     state["publications_slug"] = entry["slug"]
     state["publications_url"] = publications.publications_url(entry["slug"])
+    if cover:
+        state["cover"] = {k: v for k, v in cover.items() if k != "path"}
     _write_json_atomic(state_p, state)
     log(f"  crossref: publications entry pushed -> {state['publications_url']}")
     return entry
