@@ -163,12 +163,18 @@ def doi_url(doi: str) -> str:
     return "https://doi.org/" + re.sub(r"^doi:", "", doi, flags=re.I)
 
 
+def published_on(paper: dict) -> str:
+    """The publication date the site reads (published_date, else accepted_date):
+    a citation's year and the volume follow publication, as in cite.ts."""
+    return paper.get("published_date") or paper.get("accepted_date") or ""
+
+
 def cite_as(paper: dict, j: dict) -> str:
     """The page's "The work" plain-text citation (cite.ts plainTextWork)."""
     authors = authors_apa_list(paper.get("authors") or [])
-    year = (paper.get("accepted_date") or "")[:4]
+    year = published_on(paper)[:4]
     if is_institute_doi(paper["doi"], j["prefix"]):
-        vol = volume_for(paper.get("accepted_date") or "", j["volumes"])
+        vol = volume_for(published_on(paper), j["volumes"])
         art = article_number_for(paper["doi"], j["prefix"])
         loc = j["title"] + (f", {vol['volume']}" if vol else "") + (f", Article {art}" if art else "")
         return f"{authors} ({year}). {paper['title']}. {loc}. {doi_url(paper['doi'])}"
@@ -320,7 +326,7 @@ def _page_size(page) -> str:
 def render_cover(paper: dict, rec: dict, site: Site, size: str = "Letter") -> bytes:
     j = site.journal()
     doi = bare_doi(paper["doi"])
-    vol = volume_for(paper.get("accepted_date") or "", j["volumes"])
+    vol = volume_for(published_on(paper), j["volumes"])
     art = article_number_for(doi, j["prefix"])
     issue = " &middot; ".join(x for x in (
         f"Volume {_escape(vol['volume'])} ({_escape(vol['year'])})" if vol else "",

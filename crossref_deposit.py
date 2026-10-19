@@ -576,6 +576,18 @@ def landing_url_for(submission: dict, sub_dir: Path) -> str:
     return publications.publications_url(publications.make_slug(submission.get("title", "")))
 
 
+def _decision_date(sub_dir: Path) -> Optional[_dt.date]:
+    """The acceptance day: the UTC date of the accept decision's stamp
+    (state.json completed_at), or None when the paper has no accept stamp."""
+    try:
+        st = json.loads((Path(sub_dir) / "state.json").read_text())
+        if st.get("decision") == "accept" and st.get("completed_at"):
+            return _dt.date.fromisoformat(st["completed_at"][:10])
+    except Exception:
+        pass
+    return None
+
+
 def stage(sub_dir: Path, submission: Optional[dict] = None, *,
           doi: Optional[str] = None, out_dir: Optional[Path] = None,
           content_type: Optional[str] = None,
@@ -596,13 +608,7 @@ def stage(sub_dir: Path, submission: Optional[dict] = None, *,
     landing = landing_url_for(submission, sub_dir)
     pdf_url = _cfg("CROSSREF_PDF_URL", "https://icsacinstitute.org/papers/{sub_id}.pdf")
     pdf_url = pdf_url.format(sub_id=sub_id) if pdf_url else None
-    acc = None
-    try:
-        st = json.loads((sub_dir / "state.json").read_text())
-        if st.get("decision") == "accept" and st.get("completed_at"):
-            acc = _dt.date.fromisoformat(st["completed_at"][:10])
-    except Exception:
-        acc = None
+    acc = _decision_date(sub_dir)
     xml_bytes = build_deposit_xml(submission, doi=doi, landing_url=landing, pdf_url=pdf_url,
                                   citations=_load_citations(sub_id), content_type=content_type,
                                   acceptance_date=acc)
@@ -998,6 +1004,37 @@ def _deposited_dates(xml_path: Path) -> tuple[Optional[_dt.date], Optional[_dt.d
     return acc, pub
 
 
+def _registry_dates(sub_dir: Path, proto: dict, *, log) -> dict:
+    """accepted_date + published_date for the registry entry, so the page shows
+    the dates Crossref holds: each is read back from the deposited XML. A date
+    the deposit lacks keeps the existing entry's (a re-run changes nothing),
+    else falls back to the accept decision's stamp (accepted) or today
+    (published). The log names where each date came from."""
+    import publications
+    dep_acc, dep_pub = _deposited_dates(sub_dir / "crossref" / "deposit.xml")
+    prior = publications.find_entry(proto) or {}
+    out: dict = {}
+    said: list[str] = []
+    for key, label, deposited in (("accepted_date", "accepted", dep_acc),
+                                  ("published_date", "published", dep_pub)):
+        if deposited:
+            out[key] = deposited.isoformat()
+            said.append(f"{label} {out[key]} (from the deposit)")
+        elif prior.get(key):
+            # Left out of the proto: the upsert keeps the entry's own value.
+            said.append(f"{label} {prior[key]} (NOT in the deposit; the existing entry's, kept)")
+        elif key == "accepted_date" and _decision_date(sub_dir):
+            out[key] = _decision_date(sub_dir).isoformat()
+            said.append(f"{label} {out[key]} (NOT in the deposit; the accept decision's stamp)")
+        else:
+            out[key] = _dt.date.today().isoformat()
+            said.append(f"{label} {out[key]} (NOT in the deposit; today)")
+    if out.get("published_date") and out.get("accepted_date") and out["published_date"] < out["accepted_date"]:
+        said.append(f"published {out.pop('published_date')} DROPPED: before acceptance")
+    log(f"  crossref: registry dates: {'; '.join(said)}")
+    return out
+
+
 def _make_cover(sub_dir: Path, slug: str, *, log) -> dict:
     """Run tools/wrap-paper-pdf.py on the PDF just copied to the website tree.
     Returns {"file", "made_at", "path"} or {"error", "at"}; never raises."""
@@ -1074,6 +1111,9 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
     pre = preprint_doi(submission)
     if pre:
         proto["preprint_doi"] = pre   # the paper page links the preprint it was submitted from
+    # Accepted and published as deposited; upsert_entry would otherwise date
+    # acceptance to registration day.
+    proto.update(_registry_dates(sub_dir, proto, log=log))
     # register --live runs only after the curator typed the confirmation: approved.
     entry = publications.upsert_entry(proto, approved=True)
     if not entry:
