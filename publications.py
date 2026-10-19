@@ -80,7 +80,7 @@ def _save_registry(registry: list[dict]) -> None:
 # upsert untouched (audit 2026-09-28 item 10: they were dropped, sub_id and the
 # licence with them, so a Crossref-path landing page had no PDF link).
 _OPTIONAL_KEYS = (
-    "license_url", "keywords", "canonical_url", "ssrn_id", "ssrn_url", "ssrn_doi",
+    "published_date", "license_url", "keywords", "canonical_url", "ssrn_id", "ssrn_url", "ssrn_doi",
     "promotion_opt_out", "promotion_exclusions", "persistence_opt_out",
     "code_data_url", "preprint_doi",
 )
@@ -134,6 +134,19 @@ def _match_existing(registry: list[dict], proto: dict) -> Optional[int]:
     return None
 
 
+def find_entry(proto: dict) -> Optional[dict]:
+    """The registry entry an upsert of `proto` would update, or None (also when
+    the registry is not configured or cannot be read)."""
+    if not WEBSITE_REPO:
+        return None
+    try:
+        registry = _load_registry()
+    except (OSError, ValueError):
+        return None
+    i = _match_existing(registry, proto)
+    return dict(registry[i]) if i is not None else None
+
+
 # ── The publish gate (2026-09-29) ─────────────────────────────────────────────
 # The curator's rule: nothing publishes anywhere without his approval; everything
 # else is drafted and ready to go. The writers below (registry, public review,
@@ -178,8 +191,18 @@ def upsert_entry(proto: dict, *, approved: bool = False) -> dict:
     """Insert or update a publications entry. Returns the final entry.
 
     `proto` must carry: title, authors (list[str]), doi, source. Optional:
-    abstract, source_ref, record_id, accepted_date (defaults to today),
-    slug (auto-derived from title if absent).
+    abstract, source_ref, record_id, slug (auto-derived from title if absent),
+    and two dates, YYYY-MM-DD:
+
+      accepted_date   the day the paper was accepted: the page's "Accepted"
+                      row, the journal's order and the volume. Defaults to
+                      the existing entry's, else today.
+      published_date  the day it was published online, when that is not the
+                      day of acceptance (the Crossref route registers the DOI
+                      after the decision). The publication date Google
+                      Scholar, the JSON-LD and the feed read; without it they
+                      read accepted_date. Absent, the existing entry's is kept.
+                      Never before accepted_date (ValueError, nothing written).
 
     Existing entries (matched by record_id or doi) are updated in place;
     the existing slug is preserved for URL stability. New entries get a
@@ -246,12 +269,20 @@ def upsert_entry(proto: dict, *, approved: bool = False) -> dict:
     for key in _OPTIONAL_KEYS:
         if key in proto and proto[key] not in (None, "", [], {}):
             final[key] = proto[key]
+    # The website's schema refuses this, and a refused registry fails every build.
+    if final.get("published_date") and final["published_date"] < final["accepted_date"]:
+        raise ValueError(
+            f"published_date {final['published_date']} is before accepted_date "
+            f"{final['accepted_date']} for {proto['doi']}; registry not written"
+        )
 
     # Re-key in canonical insert order so the JSON stays diff-friendly; any
-    # field not named here is kept at the end rather than dropped.
+    # field not named here is kept at the end rather than dropped. The two
+    # dates sit together (published_date keeps its first position below).
     ordered_keys = [
         "slug", "record_id", "sub_id", "title", "authors", "doi",
-        "accepted_date", "source", "source_ref", "abstract", *_OPTIONAL_KEYS,
+        "accepted_date", "published_date", "source", "source_ref", "abstract",
+        *_OPTIONAL_KEYS,
     ]
     canonical = {k: final[k] for k in ordered_keys if k in final}
     for k, v in final.items():
