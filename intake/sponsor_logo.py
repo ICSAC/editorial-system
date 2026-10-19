@@ -3,7 +3,8 @@
 Lives next to intake_server.py and gets wired in via a single import +
 route registration there. Kept in its own module so the submission
 intake stays focused; this module owns the website-repo side effects
-(file write, supporters.yaml mutation, git commit + push).
+(file write, supporters.yaml mutation, git commit + push), which run only
+when the curator publishes a held upload.
 
 The Stripe Checkout Session ID is the auth token: anyone with a valid
 paid Sponsor session can upload a logo for that session. Stripe is
@@ -19,19 +20,32 @@ Filename for the uploaded logo: first 8 chars of sha256(session_id) +
 canonical extension by mime sniff (PNG/JPEG/SVG/WebP). The session-id
 hash is opaque, collision-free in practice, and stable for re-uploads.
 
-Side effects per successful upload:
-  1. Logo written to icsacinstitute.org/public/supporter-logos/<8hex>.<ext>
-  2. supporters.yaml updated (record keyed by stripe_sub id; logo_pending
-     cleared, logo_path set, display_name + website_url filled).
-  3. `git commit && git push origin main` from the website repo.
+An upload publishes nothing: nothing reaches the site without the curator's
+approval. Side effects per successful upload:
+  1. The logo and the proposed listing are held in the ready-to-publish
+     directory as sponsor-logo-<8hex>.<ext> + sponsor-logo-<8hex>.json; a
+     re-upload for the same session replaces the held one.
+  2. The curator gets one ping (no sponsor name, since it also goes to the
+     ntfy backup) and the image itself on Telegram, so it can be seen first.
+
+Publishing, from the repo root:
+    .venv/bin/python -m intake.sponsor_logo --apply <held .json>
+shows the supporters.yaml diff, asks for the typed word "publish", then
+writes public/supporter-logos/<8hex>.<ext> and the record (keyed by
+stripe_sub; logo_pending cleared, logo_path, display_name and website_url
+set), commits and pushes from the website repo.
 """
 
 from __future__ import annotations
 
+import argparse
+import difflib
 import hashlib
+import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +64,9 @@ SPONSOR_PRODUCT_ID = "prod_UXiXkUln7XbrQz"
 WEBSITE_REPO = Path.home() / "Desktop" / "icsac" / "icsacinstitute.org"
 LOGO_DIR = WEBSITE_REPO / "public" / "supporter-logos"
 SUPPORTERS_YAML = WEBSITE_REPO / "src" / "data" / "supporters.yaml"
+# Held uploads wait for the curator here (the directory publications.py holds entries in).
+READY_DIR = Path.home() / "icsac-submissions" / "ready-to-publish"
+STAGE_PREFIX = "sponsor-logo-"
 
 # Multipart upload cap. CF Pages edge already enforces ~5 MB; this is
 # the belt-and-suspenders check after the body parse.
@@ -227,18 +244,21 @@ def _load_supporters() -> dict[str, Any]:
     return loaded
 
 
-def _write_supporters(data: dict[str, Any]) -> None:
-    """Atomic write — temp file + rename so a crash mid-write can't corrupt."""
-    SUPPORTERS_YAML.parent.mkdir(parents=True, exist_ok=True)
-    tmp = SUPPORTERS_YAML.with_suffix(SUPPORTERS_YAML.suffix + ".tmp")
+def _render_supporters(data: dict[str, Any]) -> str:
     header = (
         "# ICSAC Supporters Registry\n"
         "# Written by sponsor-logo intake + Stripe poll job.\n"
         "# Schema: see commit history of this file.\n\n"
     )
-    body = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+
+
+def _write_supporters(data: dict[str, Any]) -> None:
+    """Atomic write — temp file + rename so a crash mid-write can't corrupt."""
+    SUPPORTERS_YAML.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SUPPORTERS_YAML.with_suffix(SUPPORTERS_YAML.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as f:
-        f.write(header + body)
+        f.write(_render_supporters(data))
     tmp.replace(SUPPORTERS_YAML)
 
 
@@ -281,43 +301,161 @@ def _upsert_sponsor(
         existing["stripe_sub"] = stripe_sub
 
 
-def _git(*args: str) -> None:
-    """Run a git command in the website repo. Raise 500 with a clean message
-    on failure so the API caller gets a real error instead of a stack trace."""
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=WEBSITE_REPO,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+def _git_output(*args: str) -> str:
+    proc = subprocess.run(["git", *args], cwd=WEBSITE_REPO, capture_output=True,
+                          text=True, check=False, timeout=60)
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        msg = " | ".join(tail[-3:]) if tail else "git command failed"
-        raise HTTPException(500, f"git {args[0]} failed: {msg}")
+        raise RuntimeError(f"git {args[0]} failed: {(proc.stderr or proc.stdout).strip()[:300]}")
+    return proc.stdout
 
 
-def _git_commit_push(logo_path_rel: str, display_name: str) -> None:
-    """Commit supporters.yaml + the new logo, then push to origin/main."""
-    # Pull first so the push can fast-forward — the website repo is the
-    # source of truth and may have unrelated commits from elsewhere.
-    _git("pull", "--rebase", "--autostash", "origin", "main")
-    _git("add", "src/data/supporters.yaml", logo_path_rel)
-    # If nothing changed (re-upload with identical bytes + same record),
-    # commit will fail; treat that as success.
-    status = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=WEBSITE_REPO,
-        check=False,
+def _stage_upload(session_hash: str, ext: str, data: bytes, listing: dict[str, str]) -> tuple[Path, Path]:
+    """Hold the logo and its proposed listing for the curator. Writes nothing to the site.
+    A re-upload for the same session replaces the held one, whatever its extension."""
+    READY_DIR.mkdir(parents=True, exist_ok=True)
+    base = f"{STAGE_PREFIX}{session_hash}"
+    image = READY_DIR / f"{base}.{ext}"
+    for other_ext in ALLOWED_MIME_EXT.values():
+        stale = READY_DIR / f"{base}.{other_ext}"
+        if other_ext != ext and stale.exists():
+            stale.unlink()
+    tmp = image.with_name(image.name + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(image)
+    record = {
+        "held_at": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "reason": "Sponsor logo upload (Stripe checkout)",
+        "session_hash": session_hash,
+        "logo_file": image.name,
+        "logo_ext": ext,
+        "logo_sha256": hashlib.sha256(data).hexdigest(),
+        **listing,
+    }
+    stage = READY_DIR / f"{base}.json"
+    tmp = stage.with_name(stage.name + ".tmp")
+    tmp.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(stage)
+    return stage, image
+
+
+def _send_logo_to_telegram(image: Path, caption: str) -> bool:
+    """Show the curator the uploaded image itself. Telegram only: the ntfy backup carries no names."""
+    import config  # noqa: PLC0415 — editorial root module, on sys.path in the server and with -m
+
+    token = getattr(config, "TELEGRAM_TOKEN", "")
+    chat_id = getattr(config, "TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return False
+    data = {"chat_id": str(chat_id), "caption": caption[:1000]}
+    thread_id = str(getattr(config, "TELEGRAM_THREAD_ID", "") or "").strip()
+    if thread_id:
+        data["message_thread_id"] = thread_id
+    try:
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(f"https://api.telegram.org/bot{token}/sendDocument", data=data,
+                               files={"document": (image.name, image.read_bytes())})
+        return resp.status_code == 200 and bool(resp.json().get("ok"))
+    except (httpx.HTTPError, ValueError) as e:
+        # Only the type: the request URL carries the bot token.
+        print(f"  sponsor-logo: Telegram image send failed ({type(e).__name__})")
+        return False
+
+
+def _ping_curator(stage: Path, image: Path, display_name: str) -> None:
+    import notify  # noqa: PLC0415
+
+    message = ("READY TO PUBLISH (held for your approval): a Sponsor logo upload from /sponsor-onboarding. "
+               "Review and publish from the editorial-system directory: "
+               f".venv/bin/python -m intake.sponsor_logo --apply {stage}")
+    try:
+        pinged = bool(notify.send_to_curator(message, parse_mode=None))
+    except Exception as e:  # noqa: BLE001 — the upload is held either way
+        print(f"  sponsor-logo: curator ping error ({type(e).__name__})")
+        pinged = False
+    if not pinged:
+        print(f"  sponsor-logo: curator ping failed; the upload is still held at {stage}")
+    if not _send_logo_to_telegram(image, f"Sponsor logo held for your approval: {display_name}"):
+        print(f"  sponsor-logo: image not sent to Telegram; it is held at {image}")
+
+
+def _apply_staged(stage: Path, push: bool = True) -> int:
+    """Review a held upload and, on the typed word "publish", put it on the site."""
+    held = json.loads(stage.read_text(encoding="utf-8"))
+    session_hash = str(held.get("session_hash", ""))
+    ext = str(held.get("logo_ext", ""))
+    if not re.fullmatch(r"[0-9a-f]{8}", session_hash) or ext not in ALLOWED_MIME_EXT.values():
+        print("sponsor-logo: the held file is malformed; nothing written", file=sys.stderr)
+        return 1
+    image = stage.with_name(f"{STAGE_PREFIX}{session_hash}.{ext}")
+    data = image.read_bytes()
+    if hashlib.sha256(data).hexdigest() != held.get("logo_sha256"):
+        print("sponsor-logo: the held image changed since the upload; nothing written", file=sys.stderr)
+        return 1
+    mime = _sniff_mime(data[:64])
+    if ALLOWED_MIME_EXT.get(mime or "") != ext or (mime == "image/svg+xml" and not _svg_is_inert(data)):
+        print("sponsor-logo: the held image failed the format check; nothing written", file=sys.stderr)
+        return 1
+    if _git_output("status", "--porcelain").strip():
+        print("sponsor-logo: the website repo has uncommitted changes; refusing to apply over them", file=sys.stderr)
+        return 1
+    if push:
+        _git_output("pull", "--rebase", "origin", "main")
+
+    before = SUPPORTERS_YAML.read_text(encoding="utf-8") if SUPPORTERS_YAML.exists() else ""
+    supporters = _load_supporters()
+    out_name = f"{session_hash}.{ext}"
+    display_name = str(held.get("display_name", ""))
+    _upsert_sponsor(
+        supporters,
+        stripe_sub=str(held.get("stripe_sub", "")),
+        display_name=display_name,
+        website_url=str(held.get("website_url", "")),
+        logo_path=f"/supporter-logos/{out_name}",
+        valid_through=str(held.get("valid_through", "")),
     )
-    if status.returncode == 0:
-        return  # nothing staged; bail without commit/push
-    msg = f"sponsors: add {display_name} logo"
-    _git("-c", "user.email=info@icsacinstitute.org",
-         "-c", "user.name=ICSAC",
-         "commit", "-m", msg)
-    _git("push", "origin", "main")
+    after = _render_supporters(supporters)
+    logo_file = LOGO_DIR / out_name
+    if after == before and logo_file.exists() and logo_file.read_bytes() == data:
+        print(f"sponsor-logo: the site already shows {stage.name}; nothing to publish")
+        _mark_applied(stage, image)
+        return 0
+    sys.stdout.writelines(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
+                                               "supporters.yaml (live)", "supporters.yaml (after)"))
+    print(f"\nLogo: public/supporter-logos/{out_name} ({max(1, len(data) // 1024)} KB {ext}). "
+          f"The image went to Telegram with the ping; held copy: {image}")
+    if not sys.stdin.isatty():
+        print("sponsor-logo: --apply needs a terminal to confirm; nothing written", file=sys.stderr)
+        return 1
+    word = input('Type "publish" to write the logo and supporters.yaml and '
+                 + ("commit and push: " if push else "commit (no push): "))
+    if word.strip() != "publish":
+        print("sponsor-logo: not confirmed; nothing written")
+        return 1
+
+    LOGO_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = logo_file.with_name(logo_file.name + ".tmp")
+    tmp.write_bytes(data)
+    tmp.replace(logo_file)
+    # An earlier upload under another extension would be left orphaned.
+    for other_ext in ALLOWED_MIME_EXT.values():
+        stale = LOGO_DIR / f"{session_hash}.{other_ext}"
+        if other_ext != ext and stale.exists():
+            stale.unlink()
+    _write_supporters(supporters)
+    _git_output("add", "-A", "--", "src/data/supporters.yaml", "public/supporter-logos")
+    _git_output("-c", "user.email=info@icsacinstitute.org", "-c", "user.name=ICSAC",
+                "commit", "-m", f"sponsors: add {display_name} logo")
+    if push:
+        _git_output("push", "origin", "main")
+    _mark_applied(stage, image)
+    print("sponsor-logo: published" if push else "sponsor-logo: committed (not pushed)")
+    return 0
+
+
+def _mark_applied(stage: Path, image: Path) -> None:
+    for p in (stage, image):
+        if p.exists():
+            p.rename(p.with_name(p.name + ".applied"))
 
 
 def prefill_for_session(session_id: str) -> dict[str, Any]:
@@ -401,44 +539,35 @@ async def handle_sponsor_logo(
 
     # Filename: opaque 8-char session-id hash. Stable for re-uploads.
     session_hash = hashlib.sha256(session_id.encode()).hexdigest()[:8]
-    out_name = f"{session_hash}.{ext}"
-    out_path = LOGO_DIR / out_name
-    LOGO_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Write atomically — temp file + rename, so a partial write can't
-    # leave a half-bytes logo on disk.
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-    tmp_path.write_bytes(chunk_bytes)
-    tmp_path.replace(out_path)
-
-    # If this session previously uploaded under a different extension
-    # (e.g. PNG then later SVG), purge the stale variants so git diff
-    # doesn't accumulate orphans.
-    for other_ext in ALLOWED_MIME_EXT.values():
-        if other_ext == ext:
-            continue
-        stale = LOGO_DIR / f"{session_hash}.{other_ext}"
-        if stale.exists():
-            stale.unlink()
-
-    logo_path_rel = f"public/supporter-logos/{out_name}"
-
-    supporters = _load_supporters()
-    _upsert_sponsor(
-        supporters,
-        stripe_sub=info["stripe_sub"],
-        display_name=display_name,
-        website_url=website_url,
-        logo_path="/" + logo_path_rel.removeprefix("public/"),
-        valid_through=info["valid_through"],
-    )
-    _write_supporters(supporters)
-
-    _git_commit_push(logo_path_rel, display_name)
+    # Held for the curator; nothing reaches the site until the curator publishes it.
+    stage, image = _stage_upload(session_hash, ext, chunk_bytes, {
+        "stripe_sub": info["stripe_sub"],
+        "display_name": display_name,
+        "website_url": website_url,
+        "valid_through": info["valid_through"],
+    })
+    _ping_curator(stage, image, display_name)
 
     return {
         "ok": True,
+        "held": True,
         "display_name": display_name,
-        "logo_path": "/" + logo_path_rel.removeprefix("public/"),
-        "committed_at": int(time.time()),
+        "received_at": int(time.time()),
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Review and publish a held sponsor-logo upload.")
+    ap.add_argument("--apply", type=Path, required=True, metavar="FILE", help="the held sponsor-logo-<id>.json")
+    ap.add_argument("--no-push", action="store_true", help="commit but do not pull or push")
+    args = ap.parse_args(argv)
+    try:
+        return _apply_staged(args.apply, push=not args.no_push)
+    except Exception as e:  # noqa: BLE001
+        print(f"sponsor-logo: apply FAILED: {getattr(e, 'detail', None) or e!r}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
