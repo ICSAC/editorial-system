@@ -1,8 +1,8 @@
 """Poll staged-draft Zenodo deposits for publish-status transitions.
 
 PDF-route ICSAC submissions stage a draft Zenodo deposit on accept but
-NEVER auto-publish (minted DOIs are
-permanent, the operator publishes manually). This module provides the
+NEVER auto-publish (minted DOIs are permanent, so the operator publishes
+manually). This module provides the
 inverse poll: scan the on-disk submission state, hit Zenodo per-draft to
 check whether the operator has published, and on transition:
 
@@ -311,7 +311,7 @@ def poll_drafts() -> dict:
                 msg = (f"READY TO PUBLISH (held for your approval): {sub_id} is live on Zenodo "
                        f"(DOI {deposit_doi or 'unknown'}); its /publications entry is saved at "
                        f"{held.ready_path}. Nothing was published and the author was not told. "
-                       f"To publish it: ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO=~/Desktop/icsac/icsacinstitute.org "
+                       f"To publish it: ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO={getattr(config, 'ICSAC_WEBSITE_REPO', '') or '<website checkout>'} "
                        f"python3 publish_watcher.py")
                 try:
                     import notify

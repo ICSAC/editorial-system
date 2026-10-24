@@ -198,8 +198,7 @@ def _resolve_tier(orcid: str, tier_header: str | None) -> int:
         return 3
     return 1
 # DOI mode supports Zenodo + arXiv. Crossref + DataCite generic support is
-# the next gap. See the code below for the resolver
-# routing logic. Worker dispatches on these regexes via ingest.is_arxiv_ref.
+# the next gap. The worker dispatches on these regexes via ingest.is_arxiv_ref.
 ZENODO_DOI_RE = re.compile(r"^10\.5281/zenodo\.\d+$", re.IGNORECASE)
 ARXIV_REF_RE = re.compile(
     r"^(?:10\.48550/arXiv\.)?\d{4}\.\d{4,5}(?:v\d+)?$", re.IGNORECASE

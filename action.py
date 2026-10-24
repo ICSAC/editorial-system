@@ -405,7 +405,7 @@ def register_accepted_paper(record_id: str) -> None:
             notify.send_to_curator(
                 f"READY TO PUBLISH (held for your approval): accepted record {record_id}; its "
                 f"/publications entry is saved at {path}. Nothing was published. To publish it: "
-                f"ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO=~/Desktop/icsac/icsacinstitute.org "
+                f"ICSAC_PUBLISH_APPROVED=1 ICSAC_WEBSITE_REPO={getattr(config, 'ICSAC_WEBSITE_REPO', '') or '<website checkout>'} "
                 f"python3 -c 'import action; action.register_accepted_paper(\"{record_id}\")'",
                 parse_mode=None)
         except Exception as exc:
