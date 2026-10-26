@@ -333,7 +333,7 @@ def _extract_registry_entry(record_id: str, metadata: dict,
         "title": m.get("title", "Untitled"),
         "authors": authors or ["Unknown"],
         "doi": m.get("doi", f"10.5281/zenodo.{record_id}"),
-        "abstract": abstract[:2000] if abstract else "",
+        "abstract": abstract or "",
         "source": source,
         "source_ref": f"https://zenodo.org/records/{record_id}",
     }

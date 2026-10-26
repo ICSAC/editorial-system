@@ -1087,7 +1087,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
         "title": submission.get("title") or "Untitled",
         "authors": _proto_authors_from_submission(submission),
         "doi": doi,
-        "abstract": (submission.get("abstract") or "")[:2000],
+        "abstract": submission.get("abstract") or "",
         "source": "submission-pdf",
         "source_ref": f"https://doi.org/{doi}",
         "sub_id": sub_id,

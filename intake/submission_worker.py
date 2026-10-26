@@ -783,7 +783,7 @@ def _register_doi_accept(sub_id: str, sub_dir: Path,
         "title": title,
         "authors": _proto_authors(submission),
         "doi": doi,
-        "abstract": abstract[:2000],
+        "abstract": abstract,
         "source": "submission-doi",
         "source_ref": f"https://doi.org/{doi}",
     }

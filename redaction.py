@@ -310,6 +310,8 @@ class ParsedReview:
     disagreement: bool
     dimension_rows: list[tuple[str, str, list[str]]] = field(default_factory=list)
     reviewers: list[dict] = field(default_factory=list)
+    # How many times the same panel was run ("passes:" in the front matter; 1 when absent).
+    passes: int = 1
     # Filled by build_public_markdown: what the self-identification screen did.
     self_id_events: list[dict] = field(default_factory=list)
 
@@ -429,7 +431,42 @@ def parse_review_file(path: str) -> ParsedReview:
         disagreement=str(fm.get("disagreement", "False")).lower() == "true",
         dimension_rows=_parse_aggregate_table(body),
         reviewers=reviewers,
+        passes=_int_or(fm.get("passes"), 1),
     )
+
+
+def _int_or(value, default: int) -> int:
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return n if n >= 1 else default
+
+
+_SMALL_NUMBERS = ("zero one two three four five six seven eight nine ten eleven twelve "
+                  "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty").split()
+
+
+def _number_word(n: int) -> str:
+    return _SMALL_NUMBERS[n] if 0 <= n < len(_SMALL_NUMBERS) else str(n)
+
+
+def _panel_sentence(parsed: "ParsedReview", valid_n: int) -> str:
+    """Opening sentence of the public review. A multi-pass panel is the same
+    reviewers run more than once, so the count says so (as the Review Process
+    page does: five reviewers, the panel runs twice) instead of counting every
+    pass as a separate reviewer. A single-pass record keeps its old sentence."""
+    passes = parsed.passes
+    slots_total = len(parsed.reviewers)
+    if passes >= 2 and slots_total and slots_total % passes == 0:
+        slots = slots_total // passes
+        runs = {2: "twice", 3: "three times"}.get(passes, f"{_number_word(passes)} times")
+        reviews = "review" if valid_n == 1 else "reviews"
+        return (f"This submission was evaluated in {_number_word(valid_n)} {reviews} from a panel of "
+                f"{_number_word(slots)} independent advanced AI reviewers, each run {runs}, "
+                f"scoring six dimensions. ")
+    return (f"This submission was evaluated by a panel of {valid_n} independent "
+            f"advanced AI reviewers scoring six dimensions. ")
 
 
 _REC_WORDS = {
@@ -515,11 +552,7 @@ def build_public_markdown(parsed: ParsedReview) -> str:
         "",
         "## Open review",
         "",
-        (
-            f"This submission was evaluated by a panel of {valid_n} independent "
-            f"advanced AI reviewers scoring six dimensions. "
-            + _consensus_sentence(parsed, consensus)
-        ),
+        _panel_sentence(parsed, valid_n) + _consensus_sentence(parsed, consensus),
         "",
         "### Aggregate scores",
         "",
@@ -929,13 +962,25 @@ def parse_rqc_file(path: str) -> ParsedRQC:
     )
 
 
-def _flag_cause_is_injection_only(parsed: ParsedRQC) -> bool:
-    """True iff flag=true AND no scholarly dimension scored <=2.
+def _injection_scored_below_full(parsed: ParsedRQC) -> bool:
+    """True iff some valid slot scored the internal injection dimension below 5,
+    the rubric's injection trigger for the flag."""
+    for slot in parsed.slots:
+        if slot["errored"]:
+            continue
+        for label, score, _ in slot["dimensions"]:
+            if label != RQC_INJECTION_DIM_LABEL:
+                continue
+            try:
+                if int(re.match(r"(\d+)", score).group(1)) < 5:
+                    return True
+            except Exception:
+                continue
+    return False
 
-    When the only trigger is the internal injection_indicators dimension,
-    the public rendering shows a generic operator-review note rather than
-    identifying which scholarly dim tripped it.
-    """
+
+def _flag_without_low_scholarly_score(parsed: ParsedRQC) -> bool:
+    """True iff flag=true AND no scholarly dimension scored <=2."""
     if not parsed.flag:
         return False
     for slot in parsed.slots:
@@ -951,6 +996,20 @@ def _flag_cause_is_injection_only(parsed: ParsedRQC) -> bool:
             if n <= 2:
                 return False
     return True
+
+
+def _flag_cause_is_injection_only(parsed: ParsedRQC) -> bool:
+    """True iff the flag's only trigger is the internal injection dimension:
+    no scholarly score <=2 and an injection score below 5. The public rendering
+    then shows a generic note instead of naming the internal dimension."""
+    return _flag_without_low_scholarly_score(parsed) and _injection_scored_below_full(parsed)
+
+
+def _flag_cause_is_shared_pattern(parsed: ParsedRQC) -> bool:
+    """True iff the flag is set with no scholarly score <=2 and every injection
+    score at 5. The rubric's remaining trigger is a specificity failure shared
+    by three or more reviews, so that is what the public record says."""
+    return _flag_without_low_scholarly_score(parsed) and not _injection_scored_below_full(parsed)
 
 
 def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
@@ -1012,6 +1071,19 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
                 "The audit surfaced a concern outside the scholarly "
                 "dimensions above. The curation team reviewed the panel output "
                 "before the acceptance decision was recorded."
+            ),
+            "",
+        ])
+    # Flagged with every score above 2 and no injection signal: the trigger was
+    # a pattern across reviews, and the record must not point outside the
+    # scholarly dimensions.
+    elif parsed.flag and _flag_cause_is_shared_pattern(parsed):
+        lines.extend([
+            (
+                "The audit flagged a specificity pattern shared by several "
+                "reviews; no single score fell to 2 or below. The curation team "
+                "reviewed the panel output before the acceptance decision was "
+                "recorded."
             ),
             "",
         ])

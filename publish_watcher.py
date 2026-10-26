@@ -176,7 +176,7 @@ def _register_published(sub_dir: Path, submission: dict, deposit: dict) -> dict:
         "title": title,
         "authors": _proto_authors_from_submission(submission),
         "doi": doi,
-        "abstract": abstract[:2000],
+        "abstract": abstract,
         "source": "submission-pdf",
         "source_ref": f"https://zenodo.org/records/{record_id}" if record_id else f"https://doi.org/{doi}",
     }
