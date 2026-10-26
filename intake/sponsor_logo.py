@@ -172,7 +172,7 @@ def _verify_sponsor_session(session: dict[str, Any]) -> dict[str, Any]:
     if not matched:
         raise HTTPException(
             403,
-            "session's subscription is not a Sponsor tier — logo upload only "
+            "session's subscription is not a Sponsor tier: logo upload only "
             "available for ICSAC Sponsor subscribers.",
         )
     # A paid checkout session outlives the subscription it started; the listing
@@ -510,7 +510,7 @@ async def handle_sponsor_logo(
     if sniffed_mime not in ALLOWED_MIME_EXT:
         raise HTTPException(
             415,
-            "unrecognised image format — supply PNG, JPEG, SVG, or WebP",
+            "unrecognised image format: supply PNG, JPEG, SVG, or WebP",
         )
     ext = ALLOWED_MIME_EXT[sniffed_mime]
     if sniffed_mime == "image/svg+xml" and not _svg_is_inert(chunk_bytes):

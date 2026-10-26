@@ -1,4 +1,4 @@
-Subject: ICSAC review complete — recommend — {{icsac_submission_id}}
+Subject: ICSAC review complete: recommend ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -18,6 +18,6 @@ Your existing record at [{{source_ref}}](https://doi.org/{{source_ref}}) remains
 
 {{compaction_disclosure}}
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

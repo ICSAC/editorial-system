@@ -1,4 +1,4 @@
-Subject: ICSAC submission could not be processed — {{icsac_submission_id}}
+Subject: ICSAC submission could not be processed ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -13,6 +13,6 @@ Your submission to the Institute for Complexity Science and Advanced Computing w
 
 If you believe this is in error, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with the submission ID in the subject line. The institute will investigate.
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

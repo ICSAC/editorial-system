@@ -310,9 +310,9 @@ def _attachments_block(sub_id: str, panel_report_md: str, rqc_md: str) -> str:
     panel, rqc = bool((panel_report_md or "").strip()), bool((rqc_md or "").strip())
     lines = []
     if panel:
-        lines.append(f"- icsac-review-{sub_id}.pdf — full panel report")
+        lines.append(f"- icsac-review-{sub_id}.pdf: full panel report")
     if rqc:
-        lines.append(f"- icsac-rqc-{sub_id}.pdf — Review Quality Control audit")
+        lines.append(f"- icsac-rqc-{sub_id}.pdf: Review Quality Control audit")
     if not lines:
         return "No PDF is attached to this message; the review record follows separately."
     head = "Two PDFs are attached:" if len(lines) == 2 else "One PDF is attached:"
@@ -519,13 +519,13 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
     if panel_report_md.strip():
         attachments.append((
             f"icsac-review-{sub_id}.pdf",
-            _md_to_pdf_bytes(panel_report_md, doc_title=f"ICSAC Review — {sub_id}",
+            _md_to_pdf_bytes(panel_report_md, doc_title=f"ICSAC Review: {sub_id}",
                              kind="Panel report", sub_id=sub_id),
         ))
     if rqc_md.strip():
         attachments.append((
             f"icsac-rqc-{sub_id}.pdf",
-            _md_to_pdf_bytes(rqc_md, doc_title=f"ICSAC Review Quality Control — {sub_id}",
+            _md_to_pdf_bytes(rqc_md, doc_title=f"ICSAC Review Quality Control: {sub_id}",
                              kind="Review Quality Control audit", sub_id=sub_id),
         ))
 

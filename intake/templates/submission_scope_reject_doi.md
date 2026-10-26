@@ -1,4 +1,4 @@
-Subject: ICSAC review complete — out of scope — {{icsac_submission_id}}
+Subject: ICSAC review complete: out of scope ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -24,6 +24,6 @@ ICSAC does not charge submission, review, or article-processing fees.
 
 {{compaction_disclosure}}
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

@@ -527,7 +527,7 @@ def build_public_markdown(parsed: ParsedReview) -> str:
         "|-----------|------|--------------|",
     ]
     for label, mean, scores in parsed.dimension_rows:
-        lines.append(f"| {label} | {mean} | {', '.join(scores) or '—'} |")
+        lines.append(f"| {label} | {mean} | {', '.join(scores) or 'n/a'} |")
 
     lines.extend([
         "",
@@ -554,7 +554,7 @@ def build_public_markdown(parsed: ParsedReview) -> str:
             summary_text = SELF_ID_WITHHELD
         summary = _html.escape(_rewrite_rubric_filenames(summary_text))
         lines.append(f'<details class="reviewer-detail">')
-        lines.append(f'<summary><strong>Reviewer {idx}</strong> — {rec}</summary>')
+        lines.append(f'<summary><strong>Reviewer {idx}</strong>: {rec}</summary>')
         lines.append("")
         lines.append(f'<p><strong>Summary:</strong> {summary}</p>')
         if r["dimensions"]:
@@ -962,7 +962,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     """
     parsed.self_id_events = []
     status_line = (
-        "Review Quality Control: flagged — reviewed by the curation team before acceptance."
+        "Review Quality Control: flagged; reviewed by the curation team before acceptance."
         if parsed.flag
         else "Review Quality Control: passed."
     )
@@ -1074,7 +1074,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         by_label = {lbl: (score, just) for lbl, score, just in slot["dimensions"]}
         cells = [label]
         for dim in dims:
-            score, _ = by_label.get(dim, ("—", ""))
+            score, _ = by_label.get(dim, ("n/a", ""))
             cells.append(score)
         lines.append("| " + " | ".join(cells) + " |")
 
@@ -1091,7 +1091,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
         lines.append("")
         lines.append("<ul>")
         for dim in dims:
-            score, just = by_label.get(dim, ("—", ""))
+            score, just = by_label.get(dim, ("n/a", ""))
             if just:
                 just, ev = screen_self_identification(just, f"RQC {label} {dim}")
                 parsed.self_id_events.extend(ev)

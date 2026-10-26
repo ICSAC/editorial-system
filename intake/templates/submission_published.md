@@ -1,4 +1,4 @@
-Subject: Your ICSAC paper is live — {{icsac_submission_id}}
+Subject: Your ICSAC paper is live ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -17,6 +17,6 @@ Your paper is published in *Persistence*, the institute's journal, online first.
 
 {{curator_note}}
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

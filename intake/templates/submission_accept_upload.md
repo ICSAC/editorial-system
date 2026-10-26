@@ -1,4 +1,4 @@
-Subject: ICSAC review complete — recommend — {{icsac_submission_id}}
+Subject: ICSAC review complete: recommend ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -20,6 +20,6 @@ ICSAC's editorial endorsement is indexed at [{{publications_url}}]({{publication
 
 {{compaction_disclosure}}
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

@@ -892,7 +892,7 @@ def _process_locked(sub_id: str) -> None:
                 reason=reason,
                 remediation=(
                     "If the DOI is correct and the record is public, the "
-                    "fetch may have failed transiently — resubmit. If the "
+                    "fetch may have failed transiently; resubmit. If the "
                     "record genuinely has no PDF, deposit the manuscript "
                     "PDF on Zenodo first, or use the 'Upload PDF' tab on "
                     "the submission form to upload it directly."
@@ -947,7 +947,7 @@ def _process_locked(sub_id: str) -> None:
             ),
             remediation=(
                 "Re-export your manuscript with a text layer (most modern "
-                "word processors and LaTeX toolchains do this by default — "
+                "word processors and LaTeX toolchains do this by default; "
                 "the issue is usually a print-to-PDF or scan workflow), "
                 "and resubmit either the new DOI or the new PDF directly."
             ),

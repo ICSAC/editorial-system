@@ -930,7 +930,7 @@ async def handle_test_pipeline_submission(
     _tlog(f"T{tier} submission received: {sub_id} (auth_token={token})")
 
     if has_doi:
-        title = "(deferred — resolving from DOI)"
+        title = "(deferred: resolving from DOI)"
         abstract = ""
         # Optional on the DOI route (2026-10-02): the author's own keywords;
         # left empty, the worker takes the source record's.
@@ -1013,7 +1013,7 @@ async def handle_test_pipeline_submission(
                 "error": "no_text_layer",
                 "message": (
                     "The PDF has no extractable text layer "
-                    f"({len(text)} chars). ICSAC reviews text-layer PDFs only — "
+                    f"({len(text)} chars). ICSAC reviews text-layer PDFs only; "
                     "image-only scans cannot be evaluated by the panel."
                 ),
             })
@@ -1359,7 +1359,7 @@ async def api_submit(request: Request):
         # related_identifiers) stay null on the DOI route — the existing DOI
         # already has its own metadata and ICSAC is not minting a new one;
         # the deposit step is upload-only.
-        title = "(deferred — resolving from DOI)"
+        title = "(deferred: resolving from DOI)"
         abstract = ""
         # Optional on the DOI route (2026-10-02): the author's own keywords;
         # left empty, the worker takes the source record's.
@@ -1439,7 +1439,7 @@ async def api_submit(request: Request):
                 "error": "no_text_layer",
                 "message": (
                     "The PDF has no extractable text layer "
-                    f"({len(text)} chars). ICSAC reviews text-layer PDFs only — "
+                    f"({len(text)} chars). ICSAC reviews text-layer PDFs only; "
                     "image-only scans cannot be evaluated by the panel."
                 ),
             })

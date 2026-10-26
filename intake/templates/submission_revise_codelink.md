@@ -1,4 +1,4 @@
-Subject: ICSAC submission — revise and resubmit — {{icsac_submission_id}}
+Subject: ICSAC submission: revise and resubmit ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -22,6 +22,6 @@ If your paper has no code or data to share, remove the sentence that says it doe
 
 ICSAC doesn't charge submission, review, or article-processing fees at any stage.
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

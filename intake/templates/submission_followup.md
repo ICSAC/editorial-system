@@ -1,4 +1,4 @@
-Subject: An invitation from ICSAC — {{icsac_submission_id}}
+Subject: An invitation from ICSAC ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -12,6 +12,6 @@ If that interests you, the application is at [icsacinstitute.org/community/membe
 
 There is no mailing list behind this invitation. You will not hear from us again about this paper unless it is included in an annual print edition of *Persistence*.
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

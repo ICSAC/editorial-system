@@ -1,4 +1,4 @@
-Subject: ICSAC review complete — revise and resubmit — {{icsac_submission_id}}
+Subject: ICSAC review complete: revise and resubmit ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -30,6 +30,6 @@ There is no limit on the number of revise-and-resubmit rounds. ICSAC does not ch
 
 {{compaction_disclosure}}
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

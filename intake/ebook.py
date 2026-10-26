@@ -164,7 +164,7 @@ def _send_download_email(to_addr: str, session_id: str) -> tuple[bool, str]:
     link = f"{DOWNLOAD_PAGE}?session_id={session_id}"
     return email_send.send_email(
         to_addr=to_addr,
-        subject="Your ebook — Foundations of the Existence Threshold",
+        subject="Your ebook: Foundations of the Existence Threshold",
         body_md=_download_email_body(link),
         from_name="ICSAC Publications",
         send=True,

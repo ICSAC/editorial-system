@@ -1,4 +1,4 @@
-Subject: ICSAC submission received — {{icsac_submission_id}}
+Subject: ICSAC submission received ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -13,12 +13,12 @@ Your paper enters the institute's open-review pipeline. A multi-reviewer panel r
 
 Outcomes are score-driven: **recommend**, **revise and resubmit**, or **scope reject**. Every result goes to the institute's curation team for the final decision.
 
-You will receive a second email when the panel completes — typically within 5 to 10 days — containing the full review report and the decision. You can track the high-level status of your submission at:
+You will receive a second email when the panel completes (typically within 5 to 10 days), containing the full review report and the decision. You can track the high-level status of your submission at:
 
 [https://icsacinstitute.org/submission/{{icsac_submission_id}}](https://icsacinstitute.org/submission/{{icsac_submission_id}})
 
 If you need to correspond about this submission before the panel completes, **do not reply to this message.** Send email to [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with the submission ID in the subject line.
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)

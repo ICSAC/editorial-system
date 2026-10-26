@@ -214,7 +214,7 @@ def review_doi(doi: str, skip_notify: bool = False) -> dict:
     if review_data.get("pdf_path") and full_text_len < submission_intake.PDF_TEXT_MIN_CHARS:
         msg = (
             f"PDF has no usable text layer ({full_text_len} chars extracted). "
-            f"ICSAC requires text-layer PDFs — image-only scans and "
+            f"ICSAC requires text-layer PDFs; image-only scans and "
             f"raster-print deposits are not reviewed. Submitter must upload "
             f"a text-layer version."
         )

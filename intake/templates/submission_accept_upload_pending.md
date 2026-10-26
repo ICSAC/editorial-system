@@ -1,4 +1,4 @@
-Subject: ICSAC review complete — accepted — {{icsac_submission_id}}
+Subject: ICSAC review complete: accepted ({{icsac_submission_id}})
 
 {{author_name}},
 
@@ -7,7 +7,7 @@ Your manuscript has been accepted for publication by the Institute for Complexit
 **Submission ID:** {{icsac_submission_id}}{{revision_line}}
 **Title:** {{title}}
 **Received:** {{received_date}}
-**Decision:** {{decided_date}} — accepted
+**Decision:** {{decided_date}}, accepted
 
 {{attachments_sentence}} Your paper was read in two rounds by a panel of independent reviewers (the report lists every pass and its scores), and the panel itself was audited for rubric adherence, consistency, specificity, tone and its use of the verification evidence (the citation checks and the code package digest). You are reading the same record we publish.
 
@@ -17,7 +17,7 @@ Your manuscript has been accepted for publication by the Institute for Complexit
 
 One action is needed from you.
 
-Open your personal link to approve publication. The page asks you to sign in with the ORCID iD you submitted with; the link and that sign-in together are your signature. There you can also tick anything you would rather we did not do — social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence* — each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
+Open your personal link to approve publication. The page asks you to sign in with the ORCID iD you submitted with; the link and that sign-in together are your signature. There you can also tick anything you would rather we did not do (social media, print or broadcast advertising, newsletters, website features, or the annual print and ebook edition of *Persistence*), each all-or-nothing; leave a note for the curation team; ask us to hold and correct something; or withdraw:
 
 **{{approval_url}}**
 
@@ -45,6 +45,6 @@ These are the terms you accepted at submission (icsacinstitute.org/terms, revise
 
 If you would tell one colleague about this process, we would be glad of it. If you write a few words about the process in the notes box on your response page and tick the box beneath it, we may quote them, with your name, when we describe the institute to other independent researchers.
 
-— ICSAC
+ICSAC
 Institute for Complexity Science and Advanced Computing
 [icsacinstitute.org](https://icsacinstitute.org)
