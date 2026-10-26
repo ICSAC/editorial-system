@@ -17,9 +17,12 @@ Cost architecture (from build prompt):
     select_load_bearing         1          0   <- this module
     check_misattribution_batch  0          1   <- this module
 
-Total claude calls per submission for citation work: 2. Total OR calls: 1.
-The misattribution check MUST stay on OpenRouter — this is the operator's
-hard rule. Burning claude on per-citation misattribution would be prohibitively expensive in a single panel run.
+Total claude calls per submission for citation work: 2. The verdict call is
+one batched request to a non-Claude provider: the operator's hard rule is that
+per-citation misattribution never runs on claude (it would be prohibitively
+expensive in a single panel run). Since 2026-10-26 the chain leads with the
+providers the panel itself runs on (config.OAI_COMPAT_PROVIDERS), metered
+against the same caps.
 """
 
 import json
@@ -97,12 +100,13 @@ MISATTRIBUTION_PROMPT_TEMPLATE = textwrap.dedent("""\
     PAIRS:
     {pairs_block}
 
-    Return ONLY a JSON array of objects, one per pair, in the same order:
-        [
+    Return ONLY a JSON object whose "verdicts" array has one entry per pair,
+    in the same order:
+        {{"verdicts": [
           {{"citation_id": 0, "supports": "yes"|"no"|"unsure",
             "reason": "<one sentence>"}},
           ...
-        ]
+        ]}}
     No commentary, no markdown fencing.
 """)
 
@@ -202,12 +206,11 @@ def select_load_bearing(citations: list[dict], full_text: str, max_n: int = 10) 
 
 
 def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list[dict]:
-    """Single OpenRouter call. Constructs structured (citation, claim)
-    pairs and asks for an array of {citation_id, supports, reason}.
-
-    Slot chain mirrors the existing panel pattern (qwen primary →
-    minimax → gemma fallbacks). Reuses run_openrouter_review's request
-    shape. Returns a list of verdict dicts (possibly empty on failure).
+    """One batched call. Constructs structured (citation, claim) pairs and
+    asks for {"verdicts": [{citation_id, supports, reason}, ...]}, walking the
+    chain below (the panel's own providers first). Returns a list of verdict
+    dicts, possibly empty: the caller reports an empty result as "could not
+    check".
     """
     if not load_bearing:
         return []
@@ -234,7 +237,15 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
     # nothing said so. HF Router deepinfra first -- the provider the panel
     # itself runs on since today -- with the two OR :free models that still
     # exist as the tail. Same entry syntax as config.OPENROUTER_MODELS.
+    # 2026-10-26: it happened again. The HF credits ran out and deepinfra was
+    # paused, the panel moved to Workers AI and Mistral, and this chain stayed
+    # behind: 0 verdicts on every run from 2026-10-09. It now leads with the
+    # panel's own oai| providers (metered against their caps); the caller
+    # reports an empty result as "could not check".
     chain = [
+        "oai|cloudflare|@cf/zai-org/glm-4.7-flash",
+        "oai|cloudflare|@cf/openai/gpt-oss-120b",
+        "oai|mistral|mistral-medium-latest",
         "hf|Qwen/Qwen3-235B-A22B-Instruct-2507:deepinfra",
         "hf|deepseek-ai/DeepSeek-V4-Flash:deepinfra",
         "or|google/gemma-4-31b-it:free",
@@ -247,14 +258,38 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
     if paid:
         chain = [f"or|{paid[0]}"] + chain
 
-    raw = _call_chain(prompt, chain)
+    # An answer that does not parse into a verdict for every pair moves the
+    # chain on (2026-10-26: Workers AI JSON mode returned one verdict object,
+    # which used to end the chain with nothing usable); the fullest answer seen
+    # is kept if none is complete.
+    raw = _call_chain(prompt, chain,
+                      score=lambda r: len(_parse_verdicts(r, load_bearing)),
+                      want=len(load_bearing))
     if not raw:
         return []
+    return _parse_verdicts(raw, load_bearing)
+
+
+def _parse_verdicts(raw: str, load_bearing: list[dict]) -> list[dict]:
+    """Verdict dicts from a model answer: {"verdicts": [...]}, a bare array, or
+    an array wrapped in prose. Entries that do not name a pair are dropped."""
+    parsed = None
+    try:
+        whole = json.loads((raw or "").strip())
+        if isinstance(whole, dict) and isinstance(whole.get("verdicts"), list):
+            parsed = whole["verdicts"]
+        elif isinstance(whole, dict) and "citation_id" in whole:
+            parsed = [whole]   # one verdict object (JSON mode), a partial answer
+        elif isinstance(whole, list):
+            parsed = whole
+    except json.JSONDecodeError:
+        pass
+    if parsed is not None:
+        return _verdicts_from(parsed, load_bearing)
 
     # Pull the JSON array. Models occasionally wrap the array in chain-
     # of-thought prose; walk every [...] candidate from longest to
     # shortest and keep the first that parses to a list of dicts.
-    parsed = None
     candidates = sorted(
         (m for m in re.finditer(r"\[[\s\S]*?\]", raw)),
         key=lambda m: -(m.end() - m.start()),
@@ -278,7 +313,10 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
         return []
     if not isinstance(parsed, list):
         return []
+    return _verdicts_from(parsed, load_bearing)
 
+
+def _verdicts_from(parsed: list, load_bearing: list[dict]) -> list[dict]:
     verdicts = []
     for entry in parsed[:len(load_bearing)]:
         if not isinstance(entry, dict):
@@ -305,33 +343,151 @@ def check_misattribution_batch(load_bearing: list[dict], full_text: str) -> list
     return verdicts
 
 
-def _call_chain(prompt: str, chain: list[str]) -> str:
-    """Walk a mixed chain: `hf|<model>:<provider>` entries fire one HF Router
-    request each; consecutive `or|` / bare entries are batched into one OR
-    call (OR's own fallback handles the batch). First non-empty content wins."""
+def _call_chain(prompt: str, chain: list[str], score=None, want: int = 0) -> str:
+    """Walk a mixed chain: `oai|<provider>|<model>` entries fire one direct
+    request each to a config.OAI_COMPAT_PROVIDERS provider, `hf|<model>:<provider>`
+    entries one HF Router request each; consecutive `or|` / bare entries are
+    batched into one OR call (OR's own fallback handles the batch). Without
+    `score`, the first non-empty content wins. With it, an answer wins when
+    score(answer) >= want; otherwise the chain moves on and the highest-scoring
+    answer seen is returned at the end ("" if none scored above 0)."""
     or_batch: list[str] = []
+    best = {"out": "", "score": 0}
+
+    def _good(out: str, entry: str) -> bool:
+        if not out:
+            return False
+        if score is None:
+            return True
+        s = score(out)
+        if s >= want:
+            return True
+        print(f"  misattribution: {entry} answered {s} of {want} verdicts; trying the next entry")
+        if s > best["score"]:
+            best.update(out=out, score=s)
+        return False
 
     def _flush() -> str:
         nonlocal or_batch
         if not or_batch:
             return ""
         models, or_batch = or_batch, []
-        return _call_openrouter(prompt, models)
+        out = _call_openrouter(prompt, models)
+        return out if _good(out, "or|" + ",".join(models)) else ""
 
     for entry in chain:
         kind, sep, model = entry.partition("|")
         if not sep:
             kind, model = "or", entry
-        if kind == "hf":
+        if kind == "oai":
+            out = _flush()
+            if out:
+                return out
+            provider, _, oai_model = model.partition("|")
+            out = _call_oai_compat(prompt, provider, oai_model)
+            if _good(out, entry):
+                return out
+        elif kind == "hf":
             out = _flush()
             if out:
                 return out
             out = _call_hf_router(prompt, model)
-            if out:
+            if _good(out, entry):
                 return out
         else:
             or_batch.append(model)
-    return _flush()
+    return _flush() or best["out"]
+
+
+def _call_oai_compat(prompt: str, provider: str, model: str) -> str:
+    """One direct request to an OpenAI-compatible provider with our own key, the
+    providers the panel runs on (config.OAI_COMPAT_PROVIDERS), metered BEFORE the
+    call against the same caps as the panel's (review._usage_reserve). Request
+    overrides come from the provider's model_params. Returns content or ""."""
+    import urllib.request, urllib.error
+    import review
+    spec = (getattr(config, "OAI_COMPAT_PROVIDERS", None) or {}).get(provider) or {}
+    label = f"{provider}:{model}"
+    if not spec.get("base_url"):
+        print(f"  misattribution: unknown provider {provider!r}; skipping {label}")
+        return ""
+    key_env = spec.get("key_env", "")
+    api_key = (os.environ.get(key_env, "") or str(getattr(config, key_env, "") or "")) if key_env else ""
+    if not api_key:
+        print(f"  misattribution: {key_env or 'key'} not set; skipping {label}")
+        return ""
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 3000,
+    }
+    payload.update((spec.get("model_params") or {}).get(model) or {})
+    day, reserved, guard_err = review._usage_reserve(provider, spec, model, prompt, payload["max_tokens"])
+    if guard_err:
+        print(f"  misattribution: {provider}: {guard_err}; skipping {label}")
+        return ""
+    req = urllib.request.Request(spec["base_url"].rstrip("/") + "/chat/completions",
+                                 data=json.dumps(payload).encode())
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "icsac-editorial-system/1.0 (info@icsacinstitute.org)")
+
+    import concurrent.futures as _cf
+    HARD_TIMEOUT = 240
+
+    def _do_call():
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return json.loads(resp.read().decode())
+
+    ex = _cf.ThreadPoolExecutor(max_workers=1)   # manual shutdown(wait=False): see _call_openrouter
+    try:
+        data = ex.submit(_do_call).result(timeout=HARD_TIMEOUT)
+    except _cf.TimeoutError:
+        ex.shutdown(wait=False)
+        print(f"  misattribution: {label} exceeded {HARD_TIMEOUT}s wall clock")
+        return ""
+    except urllib.error.HTTPError as e:
+        ex.shutdown(wait=False)
+        if 400 <= e.code < 500 and e.code != 408:
+            review._usage_settle(provider, spec, model, day, reserved, 0)   # refused before inference
+        print(f"  misattribution: {label} HTTP {e.code}: {e.read()[:200].decode(errors='replace')}")
+        return ""
+    except Exception as e:
+        ex.shutdown(wait=False)
+        print(f"  misattribution: {label} call failed: {e}")
+        return ""
+    ex.shutdown(wait=False)
+    if not isinstance(data, dict):
+        print(f"  misattribution: {label} returned an unexpected response shape")
+        return ""
+    review._usage_settle(provider, spec, model, day, reserved, data.get("usage"))
+    if data.get("error"):
+        print(f"  misattribution: {label} error: {str(data['error'])[:200]}")
+        return ""
+    choices = data.get("choices") or []
+    content = ((choices[0].get("message") or {}).get("content") or "") if choices else ""
+    if content:
+        print(f"  misattribution: served by {label}")
+    return content
+
+
+def couldnt_check_note(report: str, reason: str, partial: bool = False) -> str:
+    """The verification report's section when the check produced no verdicts
+    (or, partial=True, verdicts for only some selected references) although
+    references were eligible: the panel, the RQC and the curator read that
+    claim support is unknown there, never that it is clean."""
+    lines = []
+    if not report.rstrip().endswith("---"):
+        lines.append("")
+    lines.append("### Misattribution check: " + ("incomplete" if partial else "could not run"))
+    lines.append("")
+    scope = "those references" if partial else "this submission"
+    lines.append(f"{'' if partial else 'No verdicts: '}{reason}. Whether the cited works support "
+                 f"the claims they are cited for was not checked for {scope}; treat it as "
+                 "unknown, not as clean.")
+    lines.append("")
+    return report.rstrip() + "\n" + "\n".join(lines) + "\n"
 
 
 def _call_hf_router(prompt: str, hf_model: str) -> str:

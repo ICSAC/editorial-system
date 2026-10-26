@@ -1748,12 +1748,14 @@ def _citation_header_line(record_id) -> str | None:
 def _run_citation_misattribution(record_id: str, citations: list[dict],
                                   full_text: str, report: str) -> str:
     """Phase 2: select load-bearing citations (claude -p) + check
-    misattribution (single OpenRouter batched call) + merge findings into
-    the verification report. Failure returns the Phase 1 report unchanged.
+    misattribution (one batched call on a non-Claude provider) + merge
+    findings into the verification report. Eligible references with no
+    verdicts (or an exception) add a "could not run" section, log an error
+    and ping the curator; the report is never read as clean on an empty result.
 
     The cost-per-submission contract for citation work is documented in
-    citation_misattribution.py: 2 claude calls + 1 OR call. Stay inside
-    that budget — burning more claude on misattribution would torch the
+    citation_misattribution.py: 2 claude calls + 1 batched verdict call. Stay
+    inside that budget: burning more claude on misattribution would torch the
     curator's Claude API budget.
     """
     misattrib: list[dict] = []
@@ -1763,19 +1765,41 @@ def _run_citation_misattribution(record_id: str, citations: list[dict],
         print("  Misattribution check: selecting load-bearing citations...")
         load_bearing = citation_misattribution.select_load_bearing(citations, full_text)
         if not load_bearing:
-            print("  Misattribution check: no load-bearing citations selected; skipping")
-            _append_misattribution_audit(record_id, [], None)
-            return report
-        print(f"  Misattribution check: {len(load_bearing)} citations to check; "
-              f"single OR call...")
-        misattrib = citation_misattribution.check_misattribution_batch(
-            load_bearing, full_text
-        )
-        misses = sum(1 for v in misattrib if v.get("supports") == "no")
-        print(f"  Misattribution check: {len(misattrib)} verdicts, {misses} misses")
-        report = citation_misattribution.merge_into_verification_report(
-            report, misattrib
-        )
+            import citation_verify
+            eligible = sum(1 for c in citations if citation_verify.is_identity_confirmed(c))
+            if not eligible:
+                print("  Misattribution check: no identity-confirmed citations; skipping")
+                _append_misattribution_audit(record_id, [], None)
+                return report
+            # Eligible references and no selection = the selector failed. An
+            # empty result is "could not check", never "nothing misattributed"
+            # (2026-10-26: 0 verdicts read as clean on every run from 10-09).
+            error = MisattributionNotChecked(
+                f"{eligible} identity-confirmed reference(s), no load-bearing selection returned")
+        else:
+            print(f"  Misattribution check: {len(load_bearing)} citations to check; "
+                  f"one batched call...")
+            misattrib = citation_misattribution.check_misattribution_batch(
+                load_bearing, full_text
+            )
+            if not misattrib:
+                error = MisattributionNotChecked(
+                    f"no model returned verdicts for {len(load_bearing)} reference(s)")
+        if error is not None:
+            print(f"  Misattribution check: COULD NOT CHECK ({error})")
+            report = citation_misattribution.couldnt_check_note(report, str(error))
+            _misattribution_not_checked_alert(record_id, str(error))
+        else:
+            misses = sum(1 for v in misattrib if v.get("supports") == "no")
+            print(f"  Misattribution check: {len(misattrib)} verdicts, {misses} misses")
+            report = citation_misattribution.merge_into_verification_report(
+                report, misattrib
+            )
+            unjudged = len(load_bearing) - len(misattrib)
+            if unjudged > 0:
+                report = citation_misattribution.couldnt_check_note(
+                    report, f"{unjudged} of {len(load_bearing)} selected reference(s) got no verdict",
+                    partial=True)
         # Persist the Phase 2 verdicts alongside the Phase 1 audit
         # artifact for the same record. Re-write the JSON to include them.
         try:
@@ -1796,6 +1820,12 @@ def _run_citation_misattribution(record_id: str, citations: list[dict],
     except Exception as exc:
         error = exc
         print(f"  Misattribution check failed (non-fatal): {type(exc).__name__}: {exc}")
+        try:
+            import citation_misattribution as _cm
+            report = _cm.couldnt_check_note(report, f"{type(exc).__name__}: {exc}")
+        except Exception:
+            pass
+        _misattribution_not_checked_alert(record_id, f"{type(exc).__name__}: {exc}")
 
     _append_misattribution_audit(record_id, misattrib, error)
     return report
@@ -1807,6 +1837,26 @@ def _is_test_record_id(record_id: str) -> bool:
     audit-log-test.jsonl alongside the rest of the test trail rather
     than letting them leak into production observability."""
     return record_id.startswith("ICSAC-SUB-TEST-")
+
+
+class MisattributionNotChecked(RuntimeError):
+    """References were eligible for the misattribution check and it produced no
+    verdicts (the selector or every model in the chain returned nothing)."""
+
+
+def _misattribution_not_checked_alert(record_id: str, reason: str) -> None:
+    """One curator ping per production run whose misattribution check could not
+    run. Test ids stay quiet. Never raises."""
+    if _is_test_record_id(record_id):
+        return
+    try:
+        import notify as _notify
+        _notify.send_to_curator(
+            f"ICSAC misattribution check could not run for {record_id}: {reason}. "
+            f"Claim support is unchecked for this paper; the panel's evidence says so.",
+            parse_mode=None)
+    except Exception:
+        pass
 
 
 def _append_misattribution_audit(record_id: str, misattrib: list[dict], error) -> None:
