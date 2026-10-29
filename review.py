@@ -1745,6 +1745,16 @@ def _citation_header_line(record_id) -> str | None:
     return " · ".join(parts) if parts else None
 
 
+def _citations_checked(record_id) -> bool:
+    """True when the saved citations JSON holds at least one checked reference.
+    A missing or unreadable file means nothing was checked."""
+    try:
+        with open(os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.json")) as f:
+            return bool((json.load(f) or {}).get("citations"))
+    except Exception:
+        return False
+
+
 def _run_citation_misattribution(record_id: str, citations: list[dict],
                                   full_text: str, report: str) -> str:
     """Phase 2: select load-bearing citations (claude -p) + check
@@ -2052,7 +2062,8 @@ def review_paper(review_data: dict) -> tuple[str, dict]:
     # success — the failure path above already returned.
     compacted_data = dict(review_data)
     compacted_data["full_text"] = (
-        review_compaction.panel_notice()
+        review_compaction.panel_notice(
+            citations_checked=bool(split_verification_report(verification_report or "")[1].strip()))
         + review_compaction.blind_aux_text(redacted_text, compaction_manifest)
     )
     compacted_data["creators"] = [

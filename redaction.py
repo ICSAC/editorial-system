@@ -1021,7 +1021,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
     """
     parsed.self_id_events = []
     status_line = (
-        "Review Quality Control: flagged; reviewed by the curation team before acceptance."
+        "Review Quality Control: flagged; reviewed by the curation team before the decision."
         if parsed.flag
         else "Review Quality Control: passed."
     )
@@ -1070,7 +1070,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
             (
                 "The audit surfaced a concern outside the scholarly "
                 "dimensions above. The curation team reviewed the panel output "
-                "before the acceptance decision was recorded."
+                "before the decision was recorded."
             ),
             "",
         ])
@@ -1082,8 +1082,7 @@ def build_public_rqc_markdown(parsed: ParsedRQC) -> str:
             (
                 "The audit flagged a specificity pattern shared by several "
                 "reviews; no single score fell to 2 or below. The curation team "
-                "reviewed the panel output before the acceptance decision was "
-                "recorded."
+                "reviewed the panel output before the decision was recorded."
             ),
             "",
         ])

@@ -370,8 +370,10 @@ def main(argv: list[str]) -> int:
     received_date = _us(state_pre.get("received_at") or submission.get("received_at") or "")
     decided_date = _us(_now_iso())
     citation_line = ""
+    citations_checked = None
     try:
         import review as _review
+        citations_checked = _review._citations_checked(sub_id)
         hdr = _review._citation_header_line(sub_id)
         if hdr:
             citation_line = ("Your reference list was checked as part of the review: "
@@ -443,6 +445,7 @@ def main(argv: list[str]) -> int:
         compaction_manifest=compaction_manifest,
         curator_note=note or "", received_date=received_date,
         decided_date=decided_date, citation_line=citation_line,
+        citations_checked=citations_checked,
         author_display=author_display, affiliation=affiliation, license_name=license_name,
         terms_version=submission.get("terms_version") or getattr(config, "TERMS_VERSION", ""),
         approval_url=approval_url, objection_deadline=objection_deadline,

@@ -14,6 +14,8 @@ Scope reject is reserved for submissions that fall outside the institute's remit
 
 This is not a judgment on the manuscript's merit on its own terms. It is a statement that the institute is not the appropriate venue.
 
+{{curator_note}}
+
 ## Next steps
 
 If you believe this scope determination is in error, email [help@icsacinstitute.org](mailto:help@icsacinstitute.org) with the submission ID in the subject line and your specific objections; the curation team will re-evaluate. Otherwise we encourage you to seek a venue better aligned with the work's subject matter.

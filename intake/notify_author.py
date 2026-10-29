@@ -344,7 +344,15 @@ def _attachments_block(sub_id: str, panel_report_md: str, rqc_md: str) -> str:
     return head + "\n\n" + "\n".join(lines)
 
 
-def _compaction_lead(manifest: dict) -> str:
+def _reference_list_seen(manifest: dict) -> bool:
+    """The manuscript had a reference list: compaction removed one, or found its
+    start marker and could not match the section."""
+    return bool(manifest.get("references_count") or manifest.get("references_section_chars")
+                or any(isinstance(f, dict) and f.get("category") == "references_section"
+                       for f in manifest.get("match_failures") or []))
+
+
+def _compaction_lead(manifest: dict, citations_checked: bool | None = None) -> str:
     """The disclosure's first sentences, built from what the manifest shows was
     removed, item by item (audit 2026-10-01 S1: a letter said the references
     list was removed when its start marker had not matched and nothing was).
@@ -376,8 +384,11 @@ def _compaction_lead(manifest: dict) -> str:
     if not any(manifest.get(k) for k in ("author_names", "affiliations", "emails", "orcids")):
         lead += "Author details in the text stayed visible to the panel. "
     if not refs_removed:
-        lead += ("The references list was not removed, so the panel saw it, including any "
-                 "citations of your own work. ")
+        if citations_checked is False and not _reference_list_seen(manifest):
+            lead += "We found no reference list in the manuscript, so no citations were checked. "
+        else:
+            lead += ("The references list was not removed, so the panel saw it, including any "
+                     "citations of your own work. ")
     return lead
 
 
@@ -401,6 +412,7 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
                   exclusivity_confirmed: bool = False,
                   curator_findings: str = "",
                   revision_of: str = "",
+                  citations_checked: bool | None = None,
                   ) -> tuple[bool, str]:
     """Send the decision email with two PDF attachments (panel report + RQC).
 
@@ -479,14 +491,20 @@ def send_decision(*, to: str, sub_id: str, title: str, author_name: str,
         )
     else:
         manifest_lines = review_compaction.render_manifest(compaction_manifest)
-        lead = _compaction_lead(compaction_manifest)
+        lead = _compaction_lead(compaction_manifest, citations_checked)
+        # citations_checked=False: the verification produced no per-reference
+        # results, so the letter must not say a reference list was checked.
+        if citations_checked is False:
+            verification = (" Citation verification returned no results for your reference list."
+                            if _reference_list_seen(compaction_manifest) else "")
+        else:
+            verification = (" Citation verification was performed separately against your full "
+                            "reference list upstream of the panel.")
         disclosure = (
             lead +
             "The step is meant to reduce author-identity bias, lower token "
             "consumption, and add a privacy layer between authors and the "
-            "models in the panel. Citation verification was performed "
-            "separately against your full reference list upstream of the "
-            "panel.\n\n"
+            "models in the panel." + verification + "\n\n"
             "If you believe this preprocessing affected the decision in a "
             "way you want to contest, contact help@icsacinstitute.org and "
             "reference your submission ID.\n\n"

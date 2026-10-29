@@ -149,7 +149,7 @@ The model emits JSON with this exact shape. The editorial workflow serializes it
 
 The public markdown/HTML pair at `src/data/public-reviews/<record_id>_review_quality_control.{md,html}` carries:
 
-- A one-line status: `Review Quality Control: passed.` or `Review Quality Control: flagged — reviewed by human curators before acceptance.`
+- A one-line status: `Review Quality Control: passed.` or `Review Quality Control: flagged; reviewed by the curation team before the decision.`
 - A short paragraph naming which scholarly dimensions were audited (rubric adherence, internal consistency, specificity, institutional voice, use of the verification evidence) and the audit's purpose.
 - A condensed per-slot table showing only the five scholarly dimensions, with positional reviewer labels. Records audited before 2026-10-01 carry four.
 - No `injection_indicators` column. No reference to prompt injection, security, adversarial content, or security architecture.

@@ -278,18 +278,42 @@ _SURNAME_STOP = {"in", "on", "at", "as", "or", "to", "an", "be", "do", "go", "he
                  "is", "it", "me", "my", "no", "of", "so", "up", "us", "we", "and", "the"}
 
 
+def _split_author_entry(entry: str) -> list[str]:
+    """One manifest entry -> the names in it. The extraction may return a whole
+    byline as one entry ("A. Smith, B. Jones and C. Lee"), so ';', ' and ' and
+    '&' always separate names. A comma separates names too, except in a single
+    "Surname, Given" name: two parts, one of them a single word ("Lovelace, Ada",
+    "Smith, J."). All single-word parts pair up as Surname, Given."""
+    parts = [p.strip() for p in re.split(r"\s*;\s*|\s+and\s+|\s*&\s*", entry) if p.strip()]
+    names: list[str] = []
+    for part in parts:
+        pieces = [c.strip() for c in part.split(",") if c.strip()]
+        if len(pieces) <= 1:
+            names.extend(pieces)
+        elif len(pieces) == 2 and (len(pieces[0].split()) == 1 or len(pieces[1].split()) == 1):
+            names.append(f"{pieces[0]}, {pieces[1]}")
+        elif all(len(c.split()) == 1 for c in pieces) and len(pieces) % 2 == 0:
+            names.extend(f"{pieces[i]}, {pieces[i + 1]}" for i in range(0, len(pieces), 2))
+        else:
+            names.extend(pieces)
+    return names
+
+
 def author_surnames(manifest: dict) -> list[str]:
-    """Surnames of the manifest's author names: 'Ada Lovelace' -> Lovelace,
-    'Lovelace, Ada' -> Lovelace. Two letters or more, never a stop word."""
+    """Surnames of the manifest's author names and of the submission's own
+    verified creators (known_author_names): 'Ada Lovelace' -> Lovelace,
+    'Lovelace, Ada' -> Lovelace, 'A. Smith, B. Jones' -> Smith, Jones.
+    Two letters or more, never a stop word."""
     out: list[str] = []
-    for n in manifest.get("author_names") or []:
-        if not isinstance(n, str) or not n.strip():
+    entries = list(manifest.get("author_names") or []) + list(manifest.get("known_author_names") or [])
+    for entry in entries:
+        if not isinstance(entry, str) or not entry.strip():
             continue
-        n = n.strip()
-        s = n.split(",")[0].strip() if "," in n else n.split()[-1]
-        s = s.strip(".;:()[]\"'")
-        if len(s) >= 2 and s.lower() not in _SURNAME_STOP and s not in out:
-            out.append(s)
+        for n in _split_author_entry(entry.strip()):
+            s = n.split(",")[0].strip() if "," in n else n.split()[-1]
+            s = s.strip(".;:()[]\"'")
+            if len(s) >= 2 and s.lower() not in _SURNAME_STOP and s not in out:
+                out.append(s)
     return out
 
 
@@ -513,6 +537,11 @@ def compact_paper(paper_text: str, *, log=None, known_identity: dict | None = No
         manifest["match_failures"] = match_failures
     manifest["original_chars"] = len(paper_text)
     manifest["redacted_chars"] = len(redacted)
+    # The verified creators' names, so surname blinding never depends on how the
+    # extraction split the byline (it can return several authors as one entry).
+    known_names = [n for n in (known_identity or {}).get("names") or [] if isinstance(n, str) and n.strip()]
+    if known_names:
+        manifest["known_author_names"] = known_names
     manifest["reduction_pct"] = round(
         100 * (1 - len(redacted) / max(len(paper_text), 1)), 1
     )
@@ -606,5 +635,22 @@ The manuscript begins below this notice.
 """
 
 
-def panel_notice() -> str:
-    return PANEL_NOTICE_TEMPLATE
+_NOTICE_VERIFIED = """Inline citation markers in the body (e.g. [Smith 2024], [1]) are preserved
+unchanged. Citation verification against the full reference list was
+performed separately upstream and is available to the editorial curator;
+the panel should not penalize the manuscript for not displaying its
+reference list inline."""
+
+_NOTICE_NOT_VERIFIED = """Inline citation markers in the body (e.g. [Smith 2024], [1]) are preserved
+unchanged. No citation verification results exist for this manuscript: no
+reference list was found, or verification did not run. Do not describe its
+references as removed, checked or verified."""
+assert _NOTICE_VERIFIED in PANEL_NOTICE_TEMPLATE, "panel notice paragraph moved; update _NOTICE_VERIFIED"
+
+
+def panel_notice(citations_checked: bool = True) -> str:
+    """The notice above the manuscript. citations_checked=False when the
+    verification report carries no per-reference results."""
+    if citations_checked:
+        return PANEL_NOTICE_TEMPLATE
+    return PANEL_NOTICE_TEMPLATE.replace(_NOTICE_VERIFIED, _NOTICE_NOT_VERIFIED)
