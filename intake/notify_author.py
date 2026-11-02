@@ -25,6 +25,26 @@ import config  # noqa: E402
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 COMMUNITY_URL = "https://icsacinstitute.org/community/membership-affiliation"
 
+_NAME_PARTICLES = {"de", "da", "di", "del", "della", "van", "von", "der", "den", "la", "le",
+                   "du", "dos", "das", "bin", "al", "y", "e"}
+
+
+def salutation_name(name: str) -> str:
+    """'Grace HOPPER' -> 'Grace Hopper', 'ada lovelace' -> 'Ada Lovelace':
+    forms arrive with surnames in capitals (2026-09-28) or typed all in lower
+    case (2026-09-30); the salutation should read as a name. A token already in
+    mixed case is left alone; lower-case particles (de, van, ...) stay lower
+    unless they open the name."""
+    out = []
+    for i, t in enumerate((name or "").split()):
+        if t.isupper() and len(t) > 1:
+            out.append(t.title())
+        elif t.islower() and (i == 0 or t not in _NAME_PARTICLES):
+            out.append(t[:1].upper() + t[1:])
+        else:
+            out.append(t)
+    return " ".join(out)
+
 
 def _fragment(name: str) -> str:
     """A reusable paragraph kept in templates/ (rendered into another template)."""
@@ -162,6 +182,11 @@ def _render(template_name: str, vars: dict) -> tuple[str, str]:
     sending mail with an unfilled placeholder.
     """
     raw = (TEMPLATES_DIR / template_name).read_text()
+    if "author_name" in vars:
+        # Every letter opens on the author's name. It is normalised here, once, so
+        # no sender can pass the form's raw casing through (the decision letter did
+        # this itself; the published notice and the follow-up did not). Idempotent.
+        vars = {**vars, "author_name": salutation_name(str(vars["author_name"]))}
 
     def sub(match: re.Match) -> str:
         key = match.group(1).strip()

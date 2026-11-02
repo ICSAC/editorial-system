@@ -322,10 +322,14 @@ def wants_stay_involved(sub_dir: Path, submission: Optional[dict] = None,
                         state: Optional[dict] = None) -> bool:
     """For the published notice: render the 'ways to stay involved' paragraph
     only for an author who was offered the choices, did not exclude newsletters,
-    did not hold or withdraw, and is not already on a registry. FAILS CLOSED:
-    anything unreadable or unknown means the paragraph is left out."""
+    did not hold or withdraw, is not already on a registry, and whose paper the
+    curator has not marked skipped (followup_skipped_at: no membership or Reviewer
+    invitation for this paper, the same rule phase() applies to the follow-up).
+    FAILS CLOSED: anything unreadable or unknown means the paragraph is left out."""
     try:
         state = state if state is not None else _state(sub_dir)
+        if state.get("followup_skipped_at"):
+            return False
         submission = submission or _submission(sub_dir)
         resp = author_response(sub_dir, state)
         if not resp["offered"]:

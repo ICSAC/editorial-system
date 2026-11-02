@@ -93,6 +93,8 @@ def main() -> int:
     FRESH = mk(prod, "ICSAC-SUB-00117", state={**BASE, "crossref_registered_at": reg15,
                                                "followup_draft_started_at": iso(NOW - dt.timedelta(minutes=5))})
     CORRUPT = mk(prod, "ICSAC-SUB-00118", state={**BASE, "crossref_registered_at": reg15})
+    SKIPPED = mk(prod, "ICSAC-SUB-00190", state={**BASE, "crossref_registered_at": reg15,
+                                                 "followup_skipped_at": iso(NOW), "followup_skip_reason": "curator by hand"})
     (CORRUPT / "state.json").write_text("{not json")
 
     # ── stubs (transport and messaging only) ──
@@ -169,6 +171,8 @@ def main() -> int:
     check(pp.wants_stay_involved(LEGACY) is False, "legacy author (never offered the choices) gets no paragraph")
     check(pp.wants_stay_involved(MISMATCH) is False, "record-level newsletter exclusion drops the paragraph")
     check(pp.wants_stay_involved(CORRUPT) is False, "unreadable state drops the paragraph (fail-closed)")
+    check(pp.phase(st(SKIPPED), NOW)[0] == "skipped", "SKIPPED: the curator's skip stops the follow-up")
+    check(pp.wants_stay_involved(SKIPPED) is False, "SKIPPED: the curator's skip also drops the published notice's paragraph")
     saved = pp.WEBSITE_REPO; pp.WEBSITE_REPO = ""
     check(pp.wants_stay_involved(A) is False, "registry unavailable drops the paragraph (fail-closed)")
     pp.WEBSITE_REPO = saved
@@ -270,6 +274,20 @@ def main() -> int:
     check(sent[6]["subject"].startswith("[T3 TEST] Your ICSAC paper is live"), "T3 published notice: prefixed draft")
     check(sent[7]["subject"].startswith("[T3 TEST]"), "published notice for a test id defaults to the T3 way")
     check("unless it is included" in sent[0]["body_md"] and "help@icsacinstitute.org" in sent[0]["body_md"] and "reply" not in sent[0]["body_md"].lower(), "follow-up copy: no reply invited, support via help@ with the ID")
+
+    # ── the salutation, normalised for every letter ──
+    for raw_name, want in (("ada lovelace", "Ada Lovelace,"), ("Grace HOPPER", "Grace Hopper,"),
+                           ("Ludwig van Beethoven", "Ludwig van Beethoven,"), ("Ada Lovelace", "Ada Lovelace,")):
+        n0 = len(sent)
+        na.send_published(to="a@example.com", sub_id="ICSAC-SUB-00001", title="T", author_name=raw_name,
+                          deposit_doi="10.5555/icsac.2026.001", deposit_url="https://doi.org/x",
+                          publications_url="https://icsacinstitute.org/publications/x", stay_involved=False)
+        real_send_followup(sub_id="ICSAC-SUB-00001", tier=1, to="a@example.com", title="T",
+                           author_name=raw_name, published_date="October 1, 2026")
+        pub, fol = sent[n0]["body_md"], sent[n0 + 1]["body_md"]
+        check(pub.lstrip().startswith(want), f"published notice opens {want!r} for {raw_name!r} (got {pub.lstrip()[:30]!r})")
+        check(want in fol, f"follow-up greets {want!r} for {raw_name!r}")
+    check(na.salutation_name(na.salutation_name("grace HOPPER")) == "Grace Hopper", "salutation_name is idempotent")
 
     print(f"\n{'PASS' if not failures else 'FAILED'}: {len(failures)} failure(s) in {tmp}")
     return 0 if not failures else 1

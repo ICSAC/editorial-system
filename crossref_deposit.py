@@ -1160,7 +1160,7 @@ def _push_publications(sub_dir: Path, submission: dict, doi: str, *, log) -> dic
         except Exception:
             published = 0
         if (fresh.get("total_reviewed") or 0) < published:
-            log(f"  crossref: stats snapshot kept: a fresh count of {fresh.get(total_reviewed)} "
+            log(f"  crossref: stats snapshot kept: a fresh count of {fresh.get('total_reviewed')} "
                 f"would replace the published {published}")
         else:
             stats_path = _stats.write_stats(config.REVIEWS_DIR, out, pub)
