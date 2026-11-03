@@ -10,6 +10,7 @@ Metrics:
   - Disagreement rate (fraction where reviewers split verdicts)
   - Per-dimension mean-of-means distribution (histogram bins)
   - AI provenance-flag rate (fraction where ai_provenance_signal mean ≤ 2)
+  - Curation-team verdicts, one per submission round (accept / revise / scope_reject)
 
 No model/vendor identities leak — this snapshot is safe to publish.
 """
@@ -24,6 +25,8 @@ from collections import Counter
 
 
 RECOMMENDATIONS = ("RECOMMEND", "REVIEW_FURTHER", "REVISE_AND_RESUBMIT", "REJECT", "PAUSED_AI_FAILURE")
+# The curation team's verdicts as state.json records them.
+VERDICTS = ("accept", "revise", "scope_reject")
 DIMENSIONS = (
     "Domain Fit",
     "Methodological Transparency",
@@ -136,6 +139,9 @@ def _load_reviews(reviews_dir: str) -> list[dict]:
         if name.endswith("_citations.md"):
             # Pre-review citation verification artifact, not a panel review.
             continue
+        if name.endswith("_code_digest.md"):
+            # Digest of the author's code package, not a panel review.
+            continue
         if "ICSAC-SUB-TEST-" in name:
             # Belt-and-suspenders: if a test review file ever does end up
             # in reviews/ (e.g. from a hand-run experiment), skip it so
@@ -145,6 +151,10 @@ def _load_reviews(reviews_dir: str) -> list[dict]:
         with open(path, "r", encoding="utf-8") as f:
             text = f.read()
         fm = _parse_frontmatter(text)
+        if not fm:
+            # A panel review always opens with its frontmatter; other markdown
+            # beside it is not a review and must not count as one.
+            continue
         means = _parse_aggregate_means(text)
         rid = str(fm.get("record_id", name.split("_", 1)[0]))
         out.append(
@@ -182,15 +192,99 @@ def _histogram(values: list[float]) -> dict[str, int]:
     return bins
 
 
-def compute_stats(reviews_dir: str, public_dir: str | None = None) -> dict:
+def _default_submissions_root() -> str:
+    return os.environ.get("ICSAC_SUBMISSIONS_ROOT", os.path.expanduser("~/icsac-submissions"))
+
+
+def _norm_doi(raw: object) -> str:
+    d = str(raw or "").strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "doi:"):
+        if d.startswith(prefix):
+            d = d[len(prefix):]
+    return d
+
+
+class VerdictsUnreadable(Exception):
+    """A submission's state.json exists but cannot be read."""
+
+
+def _load_verdicts(submissions_dir: str | None, public_dir: str | None) -> dict[str, int] | None:
+    """The curation team's verdicts, one per submission round.
+
+    Each submission folder records its verdict in state.json. A revised paper
+    arrives under a new submission number, so every round counts once. Papers
+    accepted before the submission form existed have no folder: their published
+    review copy is the record (only accepted papers publish one), and a copy
+    whose DOI a submission folder already carries counts once, under the folder.
+    Returns None when the folder is missing or a state.json cannot be read, so
+    the page shows no table rather than a count that silently leaves rows out.
+    """
+    if not submissions_dir or not os.path.isdir(submissions_dir):
+        return None
+    counts: Counter = Counter()
+    sub_dois: set[str] = set()
+    try:
+        for name in sorted(os.listdir(submissions_dir)):
+            if not re.fullmatch(r"ICSAC-SUB-\d{5}", name):
+                continue   # test submissions, queues, the publish hand-off folder
+            folder = os.path.join(submissions_dir, name)
+            sub_path = os.path.join(folder, "submission.json")
+            if os.path.exists(sub_path):
+                with open(sub_path, encoding="utf-8") as f:
+                    sub = json.load(f)
+                for key in ("doi", "external_doi"):
+                    if sub.get(key):
+                        sub_dois.add(_norm_doi(sub[key]))
+            state_path = os.path.join(folder, "state.json")
+            if not os.path.exists(state_path):
+                continue   # not decided yet
+            with open(state_path, encoding="utf-8") as f:
+                decision = json.load(f).get("decision")
+            if decision:
+                counts[str(decision)] += 1
+    except (OSError, ValueError) as exc:
+        raise VerdictsUnreadable(str(exc)) from exc
+    if public_dir and os.path.isdir(public_dir):
+        seen: set[str] = set()
+        for name in sorted(os.listdir(public_dir)):
+            if not name.endswith(".md") or name.endswith(
+                    ("_citations.md", "_review_quality_control.md", "_code_digest.md")):
+                continue
+            with open(os.path.join(public_dir, name), encoding="utf-8") as f:
+                fm = _parse_frontmatter(f.read())
+            if not fm:
+                continue
+            rid = str(fm.get("record_id", ""))
+            if rid.startswith("ICSAC-SUB-"):
+                continue   # counted from its submission folder
+            key = _norm_doi(fm.get("doi")) or rid
+            if not key or key in sub_dois or key in seen:
+                continue
+            seen.add(key)
+            counts["accept"] += 1
+    out = {v: counts.get(v, 0) for v in VERDICTS}
+    other = sum(n for v, n in counts.items() if v not in VERDICTS)
+    if other:
+        out["other"] = other
+    return out
+
+
+def compute_stats(reviews_dir: str, public_dir: str | None = None,
+                  submissions_dir: str | None = None) -> dict:
     """public_dir: the website's published review records. The raw files behind
     the papers reviewed before the public flip (2026-05-16) are gone from
     reviews/, so the published copies are the only record of those reviews;
-    a record in both places counts once (raw wins)."""
+    a record in both places counts once (raw wins).
+    submissions_dir: the intake's submission folders; given, the snapshot also
+    carries the curation team's verdicts (see _load_verdicts)."""
     reviews = _load_reviews(reviews_dir)
     if public_dir:
         seen = {r["record_id"] for r in reviews}
         reviews += [r for r in _load_reviews(public_dir) if r["record_id"] not in seen]
+    try:
+        verdicts = _load_verdicts(submissions_dir, public_dir)
+    except VerdictsUnreadable:
+        verdicts = None
     now = _dt.datetime.now(_dt.timezone.utc)
     cutoff = now - _dt.timedelta(days=30)
 
@@ -249,11 +343,17 @@ def compute_stats(reviews_dir: str, public_dir: str | None = None) -> dict:
         "rqc_flagged_count_30d": rqc_flagged_30d,
         "rqc_flag_rate_overall": _rate(rqc_flagged, len(audited)),
         "rqc_flag_rate_30d": _rate(rqc_flagged_30d, len(audited_30d)),
+        **({"curation_verdicts": verdicts} if verdicts is not None else {}),
     }
 
 
-def write_stats(reviews_dir: str, out_path: str, public_dir: str | None = None) -> str:
-    stats = compute_stats(reviews_dir, public_dir)
+def write_stats(reviews_dir: str, out_path: str, public_dir: str | None = None,
+                submissions_dir: str | None = None) -> str:
+    """submissions_dir defaults to the intake's folder ($ICSAC_SUBMISSIONS_ROOT
+    or ~/icsac-submissions), so every writer carries the verdicts."""
+    if submissions_dir is None:
+        submissions_dir = _default_submissions_root()
+    stats = compute_stats(reviews_dir, public_dir, submissions_dir)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
@@ -281,5 +381,6 @@ if __name__ == "__main__":
         if len(sys.argv) > 3
         else os.path.join(os.path.dirname(os.path.dirname(out)), "data", "public-reviews")
     )
-    written = write_stats(rdir, out, pub if os.path.isdir(pub) else None)
+    subs = sys.argv[4] if len(sys.argv) > 4 else None
+    written = write_stats(rdir, out, pub if os.path.isdir(pub) else None, subs)
     print(f"wrote {written}")
