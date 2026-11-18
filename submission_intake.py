@@ -5,6 +5,8 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -472,6 +474,54 @@ def download_arxiv_pdf(arxiv_id: str, dest_dir: str = None) -> str | None:
 
 CITATION_HTTP_TIMEOUT = 15
 
+# Crossref states its limits on every answer (x-concurrency-limit 3; a rate of
+# 10 requests a second for single works, 3 for searches) and refuses the excess
+# with HTTP 429 and no Retry-After. The citation check asks from eight threads,
+# and a burst of eight refused about half. So every Crossref request goes
+# through one door per process: at most CROSSREF_MAX_CONCURRENT in flight (one
+# under the limit, leaving room for other clients on the same address),
+# searches started at least CROSSREF_SEARCH_MIN_GAP seconds apart, and a
+# refused or failed request tried again after each wait in CROSSREF_RETRY_WAITS.
+# A 404 is an answer (Crossref has no such DOI) and is never retried.
+CROSSREF_MAX_CONCURRENT = 2
+CROSSREF_SEARCH_MIN_GAP = 0.4
+CROSSREF_RETRY_WAITS = (2.0, 5.0)
+_CROSSREF_RETRY_CODES = {429, 500, 502, 503, 504}
+_crossref_slots = threading.BoundedSemaphore(CROSSREF_MAX_CONCURRENT)
+_crossref_search_lock = threading.Lock()
+_crossref_last_search = [0.0]
+
+
+def _crossref_get_json(url: str, *, search: bool = False) -> dict:
+    """GET a Crossref API URL through the door and return its parsed JSON.
+    Raises the last error when every try failed, or a non-retryable HTTP
+    error (404 included) at once."""
+    last: Exception | None = None
+    for attempt in range(len(CROSSREF_RETRY_WAITS) + 1):
+        if attempt:
+            time.sleep(CROSSREF_RETRY_WAITS[attempt - 1])
+        with _crossref_slots:
+            if search:
+                with _crossref_search_lock:
+                    wait = _crossref_last_search[0] + CROSSREF_SEARCH_MIN_GAP - time.monotonic()
+                    if wait > 0:
+                        time.sleep(wait)
+                    _crossref_last_search[0] = time.monotonic()
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "ICSAC-pipeline/1.0 (mailto:info@icsacinstitute.org)",
+                "Accept": "application/json",
+            })
+            try:
+                with urllib.request.urlopen(req, timeout=CITATION_HTTP_TIMEOUT) as resp:
+                    return json.loads(resp.read().decode("utf-8", errors="replace"))
+            except urllib.error.HTTPError as e:
+                if e.code not in _CROSSREF_RETRY_CODES:
+                    raise
+                last = e
+            except (urllib.error.URLError, TimeoutError) as e:
+                last = e
+    raise last
+
 
 def fetch_crossref_metadata(doi: str) -> dict | None:
     """Crossref REST: GET https://api.crossref.org/works/<doi>.
@@ -484,16 +534,8 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
         return None
     safe = urllib.parse.quote(doi, safe="/")
     url = f"https://api.crossref.org/works/{safe}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "ICSAC-pipeline/1.0 (mailto:info@icsacinstitute.org)",
-            "Accept": "application/json",
-        },
-    )
     try:
-        with urllib.request.urlopen(req, timeout=CITATION_HTTP_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        data = _crossref_get_json(url)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return None
     msg = data.get("message") or {}
@@ -517,6 +559,7 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
         first = issued["date-parts"][0]
         if first and isinstance(first[0], int):
             year = first[0]
+    containers = msg.get("container-title") or []
     return {
         "doi": (msg.get("DOI") or doi).lower(),
         "title": title,
@@ -524,16 +567,25 @@ def fetch_crossref_metadata(doi: str) -> dict | None:
         "abstract": abstract,
         "year": year,
         "type": msg.get("type", ""),
+        "container": (containers[0] if containers else "") or "",
+        "volume": str(msg.get("volume") or ""),
+        "page": str(msg.get("page") or ""),
     }
 
 
-def search_crossref_bibliographic(query: str, rows: int = 5) -> list[dict]:
+def search_crossref_bibliographic(query: str, rows: int = 5, type_filter: str | None = None,
+                                  raise_errors: bool = False) -> list[dict]:
     """Crossref REST: GET /works?query.bibliographic=<query>
 
     Feed the raw citation string AS-IS — e.g. "Landauer, R. (1961).
     Irreversibility and Heat Generation in the Computing Process. IBM J.
     Res. Dev. 5(3), 183-191." Crossref indexes the whole reference and
     returns ranked candidate works (DOI + title + authors + year).
+
+    ``type_filter`` restricts the search to Crossref record types, e.g.
+    "type:book,type:monograph" (filters of the same name are ORed).
+    ``raise_errors`` lets a network or parse error propagate, so a caller
+    can tell "Crossref found nothing" from "Crossref could not be asked".
 
     Returns up to ``rows`` candidate dicts in the same shape as
     fetch_crossref_metadata, with an extra ``score`` field (Crossref relevance
@@ -543,17 +595,13 @@ def search_crossref_bibliographic(query: str, rows: int = 5) -> list[dict]:
         return []
     safe = urllib.parse.quote_plus(query.strip())
     url = f"https://api.crossref.org/works?query.bibliographic={safe}&rows={rows}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "ICSAC-pipeline/1.0 (mailto:info@icsacinstitute.org)",
-            "Accept": "application/json",
-        },
-    )
+    if type_filter:
+        url += "&filter=" + urllib.parse.quote(type_filter, safe=":,")
     try:
-        with urllib.request.urlopen(req, timeout=CITATION_HTTP_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        data = _crossref_get_json(url, search=True)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        if raise_errors:
+            raise
         return []
     items = (data.get("message") or {}).get("items") or []
     out = []
@@ -578,6 +626,12 @@ def search_crossref_bibliographic(query: str, rows: int = 5) -> list[dict]:
             first = issued["date-parts"][0]
             if first and isinstance(first[0], int):
                 year = first[0]
+        containers = msg.get("container-title") or []
+        editors = []
+        for e in msg.get("editor", []) or []:
+            full = (f"{(e.get('given') or '').strip()} {(e.get('family') or '').strip()}").strip()
+            if full:
+                editors.append(full)
         out.append({
             "doi": (msg.get("DOI") or "").lower(),
             "title": title,
@@ -585,6 +639,8 @@ def search_crossref_bibliographic(query: str, rows: int = 5) -> list[dict]:
             "abstract": abstract,
             "year": year,
             "type": msg.get("type", ""),
+            "container": (containers[0] if containers else "") or "",
+            "editors": editors,
             "score": msg.get("score", 0.0),
         })
     return out

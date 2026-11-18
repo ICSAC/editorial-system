@@ -110,6 +110,12 @@ RQC_PROMPT_TEMPLATE = textwrap.dedent("""\
     2. internal_consistency  — do justifications support scores; does summary
                                match the per-dimension narrative and the
                                overall_recommendation?
+
+    A panel slot's overall_recommendation takes one of exactly four values,
+    all of them valid: RECOMMEND, REVIEW_FURTHER (the slot routes the paper to
+    the curator for judgment), REVISE_AND_RESUBMIT, REJECT. Never score a slot
+    down for using any of the four; judge only whether its recommendation fits
+    its own justifications.
     3. specificity           — does the slot cite identifiable submission
                                content (sections, figures, numerics, claims)
                                or handwave with generic phrasing?
@@ -186,17 +192,43 @@ RQC_PROMPT_TEMPLATE = textwrap.dedent("""\
 
 NO_EVIDENCE_NOTE = ("(no citation verification block and no code package digest were supplied "
                     "to the panel for this run)")
-EVIDENCE_CAP = 6000
+# The block is built in parts, each within its own budget, so a long
+# reference list can no longer push the misattribution verdicts or the code
+# digest past the cap, and no line is cut in the middle (2026-11: a
+# 100-reference paper's list filled the old 6,000-char block).
+CITATION_BUDGET = 9000
+DISAGREE_BUDGET = 3000       # inside CITATION_BUDGET: the DOI findings, then
+MISATTRIBUTION_BUDGET = 2500  # the misattribution verdicts; the rest share what is left
+DIGEST_BUDGET = 4800
+EVIDENCE_CAP = CITATION_BUDGET + DIGEST_BUDGET + 200
+BLINDING_FAILED_NOTE = ("(evidence block withheld: blinding it failed, so it could carry author "
+                        "identifiers; judge evidence_use from the panel output alone)")
+
+
+def _fit_lines(lines: list[str], budget: int, what: str) -> list[str]:
+    """Whole lines up to `budget` chars, the closing marker included."""
+    if sum(len(l) + 1 for l in lines) <= budget:
+        return list(lines)
+    out, used = [], 0
+    for i, line in enumerate(lines):
+        marker = f"[... {len(lines) - i} more {what} not shown (size cap)]"
+        if used + len(line) + 1 + len(marker) + 1 > budget:
+            out.append(marker)
+            break
+        out.append(line)
+        used += len(line) + 1
+    return out
 
 
 def build_evidence_block(record_id: str, reviews_dir: str | None = None,
                          compaction_manifest: dict | None = None) -> str:
     """What the panel was given, condensed for the auditor: the citation
     verification counts with every line the panel had to act on (DOI
-    MISMATCH, DOI DEAD, UNVERIFIABLE, and the text-matched ones), and the
-    code package digest's definitions of the paper's constructs. Blinded with
-    the same spans as the panel's copy when a compaction manifest is given.
-    Never raises; returns NO_EVIDENCE_NOTE when nothing is on disk."""
+    MISMATCH, DOI DEAD, the misattribution verdicts, UNVERIFIABLE, and the
+    text-matched ones), and the code package digest's definitions of the
+    paper's constructs. Blinded with the same spans as the panel's copy when
+    a compaction manifest is given. Never raises; returns NO_EVIDENCE_NOTE
+    when nothing is on disk."""
     reviews_dir = reviews_dir or getattr(config, "REVIEWS_DIR", "reviews")
     parts: list[str] = []
     cit_path = os.path.join(reviews_dir, f"{record_id}_citations.json")
@@ -211,28 +243,49 @@ def build_evidence_block(record_id: str, reviews_dir: str | None = None,
             disagree = [c for c in cits if not c.get("verified") and c.get("doi_identity") in ("mismatch", "dead")]
             web = [c for c in cits if c.get("confidence") == "web-source"]
             unver = [c for c in cits if not c.get("verified") and c not in disagree and c not in web]
-            lines = [f"CITATION VERIFICATION: {n} references; {len(confirmed)} CONFIRMED by identifier, "
-                     f"{len(matched)} UNCONFIRMED (no identifier cited; not evidence), {len(disagree)} with a DOI that disagrees "
-                     f"(mismatch or dead), {len(unver)} UNVERIFIABLE, {len(web)} WEB SOURCE (cited by URL, "
-                     f"not a registry work; nothing matched to it)."]
+            head = (f"CITATION VERIFICATION: {n} references; {len(confirmed)} CONFIRMED by identifier, "
+                    f"{len(matched)} UNCONFIRMED (no identifier cited; not evidence), {len(disagree)} with a DOI that disagrees "
+                    f"(mismatch or dead), {len(unver)} UNVERIFIABLE, {len(web)} WEB SOURCE (cited by URL, "
+                    f"not a registry work; nothing matched to it).")
             def _label(c):
                 a = c.get("authors") or []
                 base = (a[0] if len(a) == 1 else f"{a[0]} et al." if a else (c.get("cited_title") or c.get("title") or c.get("raw") or "")[:50])
-                return f"{base} {c.get('year') or ''}".strip()
+                return f"{str(base)[:80]} {c.get('year') or ''}".strip()
+            dis_lines: list[str] = []
             for c in disagree:
                 tag = "DOI DEAD" if c.get("doi_identity") == "dead" else "DOI MISMATCH"
-                lines.append(f"- {_label(c)} — {tag}: {(c.get('reason') or '')[:220]}")
+                dis_lines.append(f"- {_label(c)} — {tag}: {(c.get('reason') or '')[:220]}")
+            lines: list[str] = _fit_lines(dis_lines, DISAGREE_BUDGET, "DOI findings")
+            # The misattribution verdicts the panel was shown (its block's
+            # "Misattribution check" section), so panel claims about them can
+            # be checked instead of read as unanchored.
+            mis = payload.get("misattribution")
+            if isinstance(mis, list) and mis:
+                order = {"no": 0, "unsure": 1, "yes": 2}
+                mis_lines = [f"MISATTRIBUTION CHECK ({len(mis)} load-bearing references judged against the cited "
+                             "work's record; NO = the cited work does not clearly support the claim, UNSURE = "
+                             "could not tell, YES = supports it):"]
+                for v in sorted(mis, key=lambda v: order.get(str(v.get("supports")).lower(), 3)):
+                    verdict = str(v.get("supports") or "?").upper()
+                    mis_lines.append(f"- {str(v.get('label') or '?')[:90]} — {verdict}: {(v.get('reason') or '')[:160]}")
+                lines += _fit_lines(mis_lines, MISATTRIBUTION_BUDGET, "misattribution verdicts")
+            elif confirmed:
+                lines.append("MISATTRIBUTION CHECK: no verdicts recorded for this run (not run, or it could "
+                             "not run); whether the cited works support their claims is unchecked.")
+            rest: list[str] = []
             for c in unver:
                 why = (c.get("doi_identity_reason") if c.get("doi_identity") == "unchecked"
                        else None) or c.get("reason") or ""
-                lines.append(f"- {_label(c)} — UNVERIFIABLE: {why[:160]}")
+                rest.append(f"- {_label(c)} — UNVERIFIABLE: {why[:140]}")
             for c in matched:
-                lines.append(f"- {_label(c)} — UNCONFIRMED: no identifier cited; not evidence of anything")
+                rest.append(f"- {_label(c)} — UNCONFIRMED: no identifier cited")
             for c in web:
-                lines.append(f"- {_label(c)} — WEB SOURCE: {c.get('resolved_id') or ''}")
+                rest.append(f"- {_label(c)} — WEB SOURCE: {str(c.get('resolved_id') or '')[:200]}")
             if not disagree and not unver and not matched and not web:
-                lines.append("- every reference was confirmed by its identifier")
-            parts.append("\n".join(lines))
+                rest.append("- every reference was confirmed by its identifier")
+            used = len(head) + sum(len(l) + 1 for l in lines)
+            lines += _fit_lines(rest, max(200, CITATION_BUDGET - used), "citation lines")
+            parts.append("\n".join([head] + lines))
         except Exception as exc:
             parts.append(f"CITATION VERIFICATION: present but unreadable ({type(exc).__name__}).")
     dig_path = os.path.join(reviews_dir, f"{record_id}_code_digest.md")
@@ -250,23 +303,26 @@ def build_evidence_block(record_id: str, reviews_dir: str | None = None,
                 i = body.find(head)
                 if i >= 0:
                     j = body.find("\n\n", i)
-                    keep.append(body[i:j if j > 0 else None])
+                    keep.extend(body[i:j if j > 0 else None].splitlines())
             if body.lstrip().startswith("(") and not keep:
                 keep.append(body.strip().splitlines()[0])
-            parts.append("CODE PACKAGE DIGEST (what the shipped code defines):\n" + "\n".join(keep))
+            title = "CODE PACKAGE DIGEST (what the shipped code defines):"
+            parts.append("\n".join([title] + _fit_lines(keep, DIGEST_BUDGET - len(title), "digest lines")))
         except Exception as exc:
             parts.append(f"CODE PACKAGE DIGEST: present but unreadable ({type(exc).__name__}).")
     if not parts:
         return NO_EVIDENCE_NOTE
     text = "\n\n".join(parts)
-    if len(text) > EVIDENCE_CAP:
-        text = text[:EVIDENCE_CAP] + "\n[evidence block truncated]"
     if compaction_manifest and not compaction_manifest.get("_failure"):
         try:
             import review_compaction
             text = review_compaction.blind_aux_text(text, compaction_manifest)
         except Exception:
-            pass
+            # Fail closed: an unblinded block could carry author identifiers.
+            return BLINDING_FAILED_NOTE
+    if len(text) > EVIDENCE_CAP:
+        cut = text.rfind("\n", 0, EVIDENCE_CAP - 40)
+        text = text[:max(cut, 0)] + "\n[evidence block truncated]"
     return text
 
 

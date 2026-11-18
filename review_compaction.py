@@ -244,6 +244,34 @@ def _flexible_find_bounded(haystack: str, needle: str) -> tuple[int, int]:
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _ORCID_RE = re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b")
 
+# PDF text extraction can split an ORCID iD where the line wraps: the hyphen at
+# the break is dropped ("0000-" + "0002-1825-0097" reads "00000002-1825-0097")
+# or a line break follows it, and some typesetting uses Unicode dashes. The
+# pattern sweep below takes those forms too. It needs the "000" prefix every
+# issued iD starts with and only dashes between groups, so a run of figures
+# separated by spaces is left alone.
+_ORCID_DASH = "-‐‑‒–—―−"
+_ORCID_LOOSE_RE = re.compile(
+    r"(?<![\w-])000\d" + (rf"(?:[{_ORCID_DASH}]\s*)?\d{{4}}" * 2)
+    + rf"(?:[{_ORCID_DASH}]\s*)?\d{{3}}[\dX](?![\w-])")
+
+
+def _orcid_find(haystack: str, orcid: str) -> tuple[int, int]:
+    """Find one known ORCID iD in any of the forms extraction leaves: each
+    group boundary may be a dash, a dash and a line break, whitespace, or
+    nothing at all. Returns (-1, -1) for anything that is not a 16-character
+    iD."""
+    chars = re.sub(r"[^0-9Xx]", "", orcid or "").upper()
+    if len(chars) != 16:
+        return -1, -1
+    sep = rf"(?:[{_ORCID_DASH}]\s*|\s+)?"
+    pattern = (r"(?<![\w-])" + sep.join(re.escape(chars[i:i + 4]) for i in range(0, 16, 4))
+               + r"(?![\w-])")
+    m = re.search(pattern, haystack, flags=re.IGNORECASE)
+    if not m:
+        return -1, -1
+    return m.start(), m.end()
+
 
 def blind_aux_text(text: str, manifest: dict) -> str:
     """Apply a successful compaction's removed spans to a second text that the
@@ -252,18 +280,22 @@ def blind_aux_text(text: str, manifest: dict) -> str:
     Emails and ORCID iDs are removed by pattern whatever the manifest holds."""
     if not text:
         return text or ""
-    for category in ("author_names", "affiliations", "emails", "orcids"):
+    for category in ("author_names", "affiliations", "emails", "orcids", "known_orcids"):
         for s in manifest.get(category) or []:
             if not isinstance(s, str) or not s.strip():
                 continue
             text = text.replace(s, "[withheld]")
+            find = _orcid_find if category in ("orcids", "known_orcids") else _flexible_find_bounded
             while True:
                 s_idx, e_idx = _flexible_find_bounded(text, s)
+                if s_idx < 0 and find is _orcid_find:
+                    s_idx, e_idx = find(text, s)
                 if s_idx < 0:
                     break
                 text = text[:s_idx] + "[withheld]" + text[e_idx:]
     text = _EMAIL_RE.sub("[email withheld]", text)
     text = _ORCID_RE.sub("[orcid withheld]", text)
+    text = _ORCID_LOOSE_RE.sub("[orcid withheld]", text)
     # Surnames alone (audit 2026-10-01 N3): self-citations re-identified the
     # authors ("Smith and Smith 2025" in the citation report, "[Smith 2024]"
     # in the text) after the full names were gone. Capitalised and upper-case
@@ -317,6 +349,21 @@ def author_surnames(manifest: dict) -> list[str]:
     return out
 
 
+def _covered_piece(text: str, snippet: str, removed: list[str]) -> bool:
+    """True when an unmatched snippet is a piece of a snippet already removed
+    in the same category AND none of it is left in the text: its letters and
+    digits in order, with up to three spaces, dashes or other marks between
+    any two, occur nowhere. Looser than every matcher that missed it, so a
+    piece still present in some other form is never excused."""
+    def squash(s: str) -> str:
+        return re.sub(r"[\W_]+", "", s).lower()
+    piece = squash(snippet)
+    if len(piece) < 4 or not any(piece in squash(r) for r in removed):
+        return False
+    pattern = r"[\W_]{0,3}".join(re.escape(ch) for ch in piece)
+    return re.search(pattern, text, flags=re.IGNORECASE) is None
+
+
 def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
     """Apply gemini-identified spans to the manuscript via string operations.
 
@@ -327,6 +374,8 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
     """
     manifest = dict(_EMPTY_MANIFEST)
     match_failures: list[dict] = []
+    covered: list[dict] = []
+    pending: list[tuple[str, str, list]] = []
 
     # Short-snippet categories: exact string replace, all occurrences.
     # Risk: if a snippet is a substring of body prose, all occurrences get
@@ -339,28 +388,57 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
         if not isinstance(snippets, list):
             snippets = []
         removed_actual = []
-        for s in snippets:
+        # Longest first, so a whole identifier goes before any piece of it the
+        # extraction also returned; the manifest keeps the extraction's order.
+        order: dict[str, int] = {}
+        for i, s in enumerate(snippets):
+            if isinstance(s, str):
+                order.setdefault(s, i)
+        for s in sorted(snippets, key=lambda x: -len(x) if isinstance(x, str) else 0):
             if not isinstance(s, str) or not s.strip():
                 continue
             if s in text:
                 text = text.replace(s, "")
                 removed_actual.append(s)
-                continue
+                if category != "orcids":
+                    continue
             # PDF extraction wraps lines inside names and affiliations: match the
             # snippet whitespace-tolerantly and remove every such occurrence
             # (audit 2026-09-28 item 2).
-            hit = False
+            hit = s in removed_actual
             while True:
                 s_idx, e_idx = _flexible_find_bounded(text, s)
                 if s_idx < 0:
                     break
                 text = text[:s_idx] + text[e_idx:]
                 hit = True
+            # An ORCID iD split by a line break, in every remaining occurrence,
+            # including after a verbatim copy elsewhere was removed.
+            while category == "orcids":
+                s_idx, e_idx = _orcid_find(text, s)
+                if s_idx < 0:
+                    break
+                text = text[:s_idx] + text[e_idx:]
+                hit = True
+            if s in removed_actual:
+                continue
             if hit:
                 removed_actual.append(s)
             else:
-                match_failures.append({"category": category, "snippet": s[:120]})
+                pending.append((category, s, removed_actual))
+        removed_actual.sort(key=lambda x: order.get(x, 0))
         manifest[category] = removed_actual
+
+    # A snippet no matcher found. The extraction can return an identifier
+    # twice, whole and as the part after a line break; once the whole one is
+    # gone the part matches nothing. It is covered when it is a piece of one
+    # removed in its category and nothing of it is left after every category
+    # above; otherwise it is a match failure.
+    for category, s, removed in pending:
+        if _covered_piece(text, s, removed):
+            covered.append({"category": category, "snippet": s[:120]})
+        else:
+            match_failures.append({"category": category, "snippet": s[:120]})
 
     # Section categories: start/end marker pair, removed verbatim.
     for section_key, manifest_text_field, count_field, chars_field in (
@@ -420,6 +498,8 @@ def _apply_removals(text: str, spans: dict) -> tuple[str, dict, list]:
                 n = len(paragraphs)
             manifest[count_field] = n
 
+    if covered:
+        manifest["covered_pieces"] = covered
     return text, manifest, match_failures
 
 
@@ -427,14 +507,18 @@ def identity_in_text(text: str, known_identity: dict | None) -> list[str]:
     """Which of the submission's own identifiers occur in the text.
     known_identity = {"names": [...], "other": [...]}: a name matches by any of
     its words of three letters or more; ORCID iDs, emails and affiliations
-    ("other") match whole. Deterministic; over-matching only makes compaction
-    stricter."""
+    ("other") match whole, an ORCID iD also in the split forms _orcid_find
+    reads. Deterministic; over-matching only makes compaction stricter."""
     t = (text or "").lower()
     hits: list[str] = []
     known_identity = known_identity or {}
     candidates = [p for n in known_identity.get("names") or [] for p in re.split(r"[\s,.]+", str(n)) if len(p) >= 3]
     candidates += [str(v).strip() for v in known_identity.get("other") or [] if str(v).strip()]
     for p in candidates:
+        if re.fullmatch(r"\d{4}-\d{4}-\d{4}-\d{3}[\dXx]", p):
+            if _orcid_find(t, p)[0] >= 0:
+                hits.append(p)
+            continue
         if re.search(r"(?<![a-z0-9])" + re.escape(p.lower()) + r"(?![a-z0-9])", t):
             hits.append(p)
     return hits
@@ -532,6 +616,20 @@ def compact_paper(paper_text: str, *, log=None, known_identity: dict | None = No
         manifest["match_failures"] = match_failures
         return "", manifest
 
+    # The submission's own ORCID iDs (creators and submitter), removed in every
+    # form even when the extraction did not report them, and kept in the
+    # manifest so blind_aux_text removes them from the other panel texts too.
+    known_orcids = [str(v).strip() for v in (known_identity or {}).get("other") or []
+                    if re.fullmatch(r"\d{4}-\d{4}-\d{4}-\d{3}[\dXx]", str(v).strip())]
+    for s in known_orcids:
+        while True:
+            s_idx, e_idx = _orcid_find(redacted, s)
+            if s_idx < 0:
+                break
+            redacted = redacted[:s_idx] + redacted[e_idx:]
+    if known_orcids:
+        manifest["known_orcids"] = known_orcids
+
     # Record the metrics + any partial failures (affiliations, funding, sections).
     if match_failures:
         manifest["match_failures"] = match_failures
@@ -553,6 +651,15 @@ def compact_paper(paper_text: str, *, log=None, known_identity: dict | None = No
 # Human-readable rendering for email + audit display.
 # ---------------------------------------------------------------------------
 
+def _one_line(entry) -> str:
+    """A removed name, affiliation, email or iD as one line of the letter. PDF
+    text can wrap an entry across lines: a break after a hyphen joins (an ORCID
+    iD or a hyphenated name wrapped at its hyphen), and any other run of
+    whitespace reads as one space. The manifest keeps the exact text removed."""
+    text = re.sub(r"-[ \t]*\n\s*", "-", str(entry))
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def render_manifest(manifest: dict) -> str:
     """Render a manifest dict as a plain-text bulleted list for the
     decision email's compaction disclosure block."""
@@ -563,13 +670,13 @@ def render_manifest(manifest: dict) -> str:
 
     lines = []
     if manifest.get("author_names"):
-        lines.append(f"  - Author names: {', '.join(manifest['author_names'])}")
+        lines.append(f"  - Author names: {', '.join(_one_line(x) for x in manifest['author_names'])}")
     if manifest.get("affiliations"):
-        lines.append(f"  - Affiliations: {', '.join(manifest['affiliations'])}")
+        lines.append(f"  - Affiliations: {', '.join(_one_line(x) for x in manifest['affiliations'])}")
     if manifest.get("emails"):
-        lines.append(f"  - Email addresses: {', '.join(manifest['emails'])}")
+        lines.append(f"  - Email addresses: {', '.join(_one_line(x) for x in manifest['emails'])}")
     if manifest.get("orcids"):
-        lines.append(f"  - ORCID iDs: {', '.join(manifest['orcids'])}")
+        lines.append(f"  - ORCID iDs: {', '.join(_one_line(x) for x in manifest['orcids'])}")
     if manifest.get("acknowledgments_text"):
         ack_len = len(manifest["acknowledgments_text"])
         lines.append(f"  - Acknowledgments section ({ack_len} characters)")

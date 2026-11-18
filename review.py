@@ -1175,11 +1175,15 @@ def _apply_thresholds(
            - Majority decline (REJECT-or-R&R combined > 60%) that wasn't
              majority-REJECT (otherwise it'd have caught the REJECT override)
            - Clean majority of reviewers individually voted REVISE_AND_RESUBMIT
-      4. RECOMMEND — `avg_score >= 3.5 and min_score >= 2.0 and
+      4. REVIEW_FURTHER (no majority) — neither the RECOMMEND votes nor the
+         decline votes (REVISE_AND_RESUBMIT + REJECT) are a strict majority
+         of the valid votes: a split panel goes to the curator, whatever the
+         scores. REVIEW_FURTHER votes count toward neither side.
+      5. RECOMMEND — `avg_score >= 3.5 and min_score >= 2.0 and
          domain_fit_score >= 4.0`. Domain Fit in [2.0, 4.0) signals
          "specialist review needed" / "methodology gap" and routes to
          curator regardless of how strong other dims are.
-      5. REVIEW_FURTHER (default) — curator judgment call.
+      6. REVIEW_FURTHER (default) — curator judgment call.
     """
     # Thresholds read the unrounded means; `mean` (one decimal) is for display
     # (audit 2026-09-28 item 12: rounding moved a 3.48 panel over the 3.5 bar).
@@ -1222,12 +1226,18 @@ def _apply_thresholds(
             return "REVISE_AND_RESUBMIT"
         if n_rr * 2 > n_valid:
             return "REVISE_AND_RESUBMIT"
+        # 4. No majority: neither RECOMMEND nor decline (R&R + REJECT) holds a
+        # strict majority of the valid votes. The score test below must not
+        # break a split panel toward RECOMMEND; the curator decides.
+        n_rec = sum(1 for r in upper if r == "RECOMMEND")
+        if n_rec * 2 <= n_valid and (n_reject + n_rr) * 2 <= n_valid:
+            return "REVIEW_FURTHER"
 
-    # 4. RECOMMEND — confident, in-scope, broadly clean.
+    # 5. RECOMMEND — confident, in-scope, broadly clean.
     if avg_score >= 3.5 and min_score >= 2.0 and domain_fit_score >= 4.0:
         return "RECOMMEND"
 
-    # 5. Default: curator judgment.
+    # 6. Default: curator judgment.
     return "REVIEW_FURTHER"
 
 
@@ -1502,26 +1512,57 @@ def save_review(review_data: dict, markdown: str) -> str:
     return path
 
 
+def _capture_label(model: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9._-]", "_", model or "unknown")[:60]
+
+
+def _settle_capture(work_path: str, result: dict, slot) -> str | None:
+    """Name a slot's raw capture after the model that ANSWERED, not the head of
+    its chain (a chain that fell through to its second entry used to be filed
+    under the first), and open it with a header naming both. A slot with no
+    answer is filed as `..._no-answer.txt`. Never raises; returns the final
+    path or None."""
+    try:
+        if not work_path or not os.path.exists(work_path):
+            return None
+        chain = ["claude"] if slot is None else (slot if isinstance(slot, list) else [slot])
+        answered = None if "error" in result else (result.get("model") or "unknown")
+        head = [f"answered_by: {answered or 'none'}", f"chain: {' -> '.join(chain)}"]
+        if answered is None:
+            head.append(f"error: {str(result.get('error', ''))[:300]}")
+        base = work_path[: -len(".capture")]
+        final = f"{base}_{_capture_label(answered)}.txt" if answered else f"{base}_no-answer.txt"
+        with open(work_path, "r", encoding="utf-8", errors="replace") as f:
+            body = f.read()
+        with open(work_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(head) + "\n" + body)
+        os.replace(work_path, final)
+        return final
+    except Exception:
+        return None
+
+
 def _run_slot(prompt, slot_idx, slot, record_id=None, pass_idx=0):
     """Run one reviewer slot. slot=None means Claude; otherwise OpenRouter chain."""
     capture_path = None
     if record_id:
-        if slot is None:
-            model_label = "claude"
-        else:
-            raw_label = slot[0] if isinstance(slot, list) else slot
-            model_label = re.sub(r"[^a-zA-Z0-9._-]", "_", raw_label)[:60]
+        # Captured under a working name, then filed under the model that
+        # answered (_settle_capture).
         raw_dir = os.path.join(config.REVIEWS_DIR, "raw", str(record_id))
-        capture_path = os.path.join(raw_dir, f"pass{pass_idx}_slot{slot_idx}_{model_label}.txt")
+        capture_path = os.path.join(raw_dir, f"pass{pass_idx}_slot{slot_idx}.capture")
     if slot is None:
         print(f"    [slot {slot_idx}] claude...")
         try:
-            return run_claude_review(prompt, capture_path=capture_path)
+            result = run_claude_review(prompt, capture_path=capture_path)
         except Exception as exc:  # one slot, not the pass (audit 2026-09-28 item 15)
-            return {"error": f"claude: {type(exc).__name__}: {str(exc)[:160]}", "model": "claude"}
-    label = slot[0] if isinstance(slot, list) else slot
-    print(f"    [slot {slot_idx}] panel:{label}...")
-    return _run_panel_chain(prompt, slot, capture_path=capture_path)
+            result = {"error": f"claude: {type(exc).__name__}: {str(exc)[:160]}", "model": "claude"}
+    else:
+        label = slot[0] if isinstance(slot, list) else slot
+        print(f"    [slot {slot_idx}] panel:{label}...")
+        result = _run_panel_chain(prompt, slot, capture_path=capture_path)
+    if capture_path:
+        _settle_capture(capture_path, result, slot)
+    return result
 
 
 def _run_single_pass(prompt: str, slots: list, min_required: int, record_id=None, pass_idx=0) -> list[dict]:
@@ -1596,6 +1637,46 @@ def _run_citation_verify(review_data: dict) -> str:
     record_id = review_data.get("record_id", "")
     if len(panel_text) < 200 or not record_id:
         return ""
+    report, saved = _run_citation_verify_phases(review_data, panel_text, record_id)
+    if saved:
+        _keep_citation_run(record_id)
+    return report
+
+
+def _keep_citation_run(record_id: str) -> str | None:
+    """Copy this run's final <record_id>_citations.json/.md (after the
+    misattribution and CiteStamp phases have rewritten them) to
+    reviews/citation-runs/<record_id>/<UTC stamp>_citations.*, so a re-run
+    keeps the earlier lists and run-to-run drift can be diffed. The live
+    names stay the latest run. Called only when this run saved its own list
+    (an earlier run's file is never copied as this one). A subfolder, so
+    nothing that lists reviews/ counts the copies. Never raises; returns the
+    stamp or None."""
+    try:
+        import datetime as _dt
+        import shutil as _sh
+        live = os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.json")
+        if not os.path.exists(live):
+            return None
+        runs = os.path.join(config.REVIEWS_DIR, "citation-runs", str(record_id))
+        os.makedirs(runs, exist_ok=True)
+        # Microseconds keep the names unique and in run order when sorted.
+        stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        while os.path.exists(os.path.join(runs, f"{stamp}_citations.json")):
+            stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        _sh.copy2(live, os.path.join(runs, f"{stamp}_citations.json"))
+        md = os.path.join(config.REVIEWS_DIR, f"{record_id}_citations.md")
+        if os.path.exists(md):
+            _sh.copy2(md, os.path.join(runs, f"{stamp}_citations.md"))
+        return stamp
+    except Exception as exc:
+        print(f"  citation run copy failed (non-fatal): {type(exc).__name__}: {exc}")
+        return None
+
+
+def _run_citation_verify_phases(review_data: dict, panel_text: str, record_id: str) -> tuple[str, bool]:
+    """The three citation phases behind _run_citation_verify. Returns (report,
+    saved): saved is True only when this run wrote its own citation list."""
 
     # The panel's `full_text` is capped at 150K chars (PDF_TEXT_MAX_CHARS),
     # which truncates long papers' bibliographies. For citation extraction
@@ -1617,6 +1698,7 @@ def _run_citation_verify(review_data: dict) -> str:
     citations: list[dict] = []
     report = ""
     error = None
+    saved = False
     try:
         import citation_verify
         print(f"  Citation verification: extracting from {len(citation_text)} chars...")
@@ -1629,6 +1711,7 @@ def _run_citation_verify(review_data: dict) -> str:
         report = citation_verify.build_verification_report(citations)
         if citations:
             citation_verify.save_citation_report(str(record_id), citations, report)
+            saved = True
     except Exception as exc:
         error = exc
         print(f"  Citation verification failed (non-fatal): {type(exc).__name__}: {exc}")
@@ -1656,7 +1739,7 @@ def _run_citation_verify(review_data: dict) -> str:
     if citations:
         report = _run_citestamp_check(record_id, citations, report)
 
-    return report
+    return report, saved
 
 
 def _run_code_digest(review_data: dict) -> str:

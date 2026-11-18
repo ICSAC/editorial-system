@@ -32,13 +32,18 @@ The standard decline path. Author is invited to address concerns and resubmit. T
 - **Combined-decline majority** — more than 60% of reviewers individually voted REJECT-or-R&R, but without a majority-REJECT consensus (that would have caught the REJECT branch above).
 - **R&R majority** — a clean majority of reviewers individually voted REVISE_AND_RESUBMIT.
 
+### REVIEW_FURTHER when the panel is split (checked before RECOMMEND)
+- **No majority** — neither the RECOMMEND votes nor the decline votes (REVISE_AND_RESUBMIT plus REJECT) are more than half of the valid votes. REVIEW_FURTHER votes count toward neither side. A split panel goes to the curator whatever the scores; the score test below never breaks it.
+
 ### RECOMMEND (accept into the community)
+- Reached only when no branch above fired, AND
 - Average score across all dimensions >= 3.5, AND
 - No single dimension below 2.0, AND
 - **Domain Fit >= 4.0** — the panel is confident in its competence to evaluate this work end-to-end. Domain Fit in [2.0, 4.0) signals "specialist review needed" or "methodology gap" and routes to REVIEW_FURTHER even when other dimensions clear RECOMMEND.
 
 ### REVIEW_FURTHER (panel signals low confidence)
 - The default when no other branch fires.
+- **No majority** either way (see above).
 - **Domain Fit between 2.0 and 4.0** — the panel can engage with the work but flags either a methodology gap (DF=2) or specialist-review-needed (DF=3) that the curator should resolve.
 - When uncertain, assign REVIEW_FURTHER rather than forcing a binary recommendation.
 

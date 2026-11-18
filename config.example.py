@@ -106,7 +106,10 @@ OPENROUTER_MODELS = [
     # the environment (OAI_COMPAT_PROVIDERS); without it they are skipped silently,
     # so the roster can be wired before the keys exist. A paper the panel cannot
     # staff is re-queued every batch tick (panel_retry.py) and screams after 24 h.
-    # Slot 1: DeepSeek family.
+    # Slot 1: DeepSeek family only when a SambaNova key is set (a paid service;
+    # without the key its entry is skipped), so without one GLM-4.7-Flash on
+    # Workers AI answers. The review and the raw capture name the model that
+    # answered.
     [
         "oai|sambanova|DeepSeek-V3.1",
         # 2026-10-12: HF's deepinfra route stopped serving DeepSeek-V4-Flash and

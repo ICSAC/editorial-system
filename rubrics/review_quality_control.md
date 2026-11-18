@@ -22,6 +22,8 @@ Each reviewer slot is referenced by position ("Reviewer 1"..N), never by model o
 
 Did the slot score against the six panel rubric dimensions — `domain_fit`, `methodological_transparency`, `internal_consistency`, `citation_integrity`, `novelty_signal`, `ai_provenance_signal` — using the correct names, in the correct 1-5 scale, with all six present?
 
+The slot's `overall_recommendation` takes one of exactly four values, all valid: `RECOMMEND`, `REVIEW_FURTHER` (routes the paper to the curator for judgment), `REVISE_AND_RESUBMIT`, `REJECT`. Using any of the four is not drift.
+
 - **5** — All six dimensions scored, correct names, correct scale, and each justification earns its score with manuscript-specific content.
 - **4** — All six dimensions scored, correct names, correct scale, one justification each.
 - **3** — Recognizable but drifted: one dimension missing or renamed, scale respected elsewhere.

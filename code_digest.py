@@ -6,11 +6,12 @@ paper defines. The panel cannot judge a claim about code it has not seen, so
 this module fetches the author's DECLARED code/data archive, read-only, and
 puts in front of the reviewers:
 
-  * the file listing (name, size) of the archive,
   * the head of its README,
-  * the function/definition inventory of every source file, and
+  * the function/definition inventory of every source file,
   * the lines that define or assign the constructs the paper names (its
-    acronyms and named measures, e.g. XRM, XRM-2, NPT), with file:line.
+    acronyms and named measures, e.g. XRM, XRM-2, NPT), with file:line, and
+  * the file listing (name, size), grouped by folder and type, last, so it
+    is the part a size cap cuts.
 
 What it never does: execute anything, write the archive to disk, follow more
 than a size cap of bytes, or touch a link the author did not declare. ICSAC's
@@ -48,7 +49,6 @@ USER_AGENT = "icsac-editorial-system/1.0 (help@icsacinstitute.org)"
 TIMEOUT = 45
 MAX_ARCHIVE_BYTES = int(getattr(config, "CODE_DIGEST_MAX_BYTES", 25 * 1024 * 1024))
 MAX_MEMBER_BYTES = 400 * 1024        # a source file bigger than this is listed, not read
-MAX_FILES_LISTED = 200
 MAX_SOURCE_FILES_READ = 60
 MAX_FILES_FETCHED = 60               # Zenodo files fetched one by one; the rest are listed only
 FETCH_WALL_SEC = 180                 # and never for longer than this in total
@@ -325,34 +325,112 @@ def term_hits(rows: list[dict], terms: list[str]) -> dict[str, list[str]]:
     return hits
 
 
+# Section budgets inside MAX_DIGEST_CHARS. The code comes first and the file
+# listing last, so a long listing can never push the definitions and construct
+# hits past the cap (2026-11: a 223-file archive's listing filled the whole
+# digest and the panel saw no code at all).
+README_BUDGET = 2500
+DEFS_BUDGET = 4000
+HITS_BUDGET = 5500
+LISTING_BUDGET = 3000
+COLLAPSE_AT = 4          # a folder holding this many data files of one type is one line
+COLLAPSE_SOURCE_AT = 20  # source files stay listed by name unless a folder holds this many
+
+
+def _fit(lines: list[str], budget: int, what: str) -> list[str]:
+    """Keep whole lines up to `budget` chars, the closing marker included."""
+    if sum(len(l) + 1 for l in lines) <= budget:
+        return list(lines)
+    out, used = [], 0
+    for i, line in enumerate(lines):
+        marker = f"  [... {len(lines) - i} more {what} lines not shown (size cap)]"
+        if used + len(line) + 1 + len(marker) + 1 > budget:
+            out.append(marker)
+            break
+        out.append(line)
+        used += len(line) + 1
+    return out
+
+
+def listing_lines(rows: list[dict], collapse: bool = True) -> list[str]:
+    """The file listing; with `collapse`, grouped by folder and file type: a
+    folder with COLLAPSE_AT or more data files of one type (COLLAPSE_SOURCE_AT
+    for source files) becomes one line with the count and total size, so a
+    data folder of hundreds of files costs one line."""
+    if not collapse:
+        return [f"  {r['path']}  ({r['size']} bytes)" + (f"  [{r['note']}]" if r.get("note") else "")
+                for r in rows]
+    groups: dict[tuple[str, str], list[dict]] = {}
+    order: list[tuple[str, str]] = []
+    for r in rows[:5000]:
+        key = (os.path.dirname(r["path"]), _ext(r["path"]))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r)
+    out = []
+    for key in order:
+        members = groups[key]
+        folder, ext = key
+        if len(members) >= (COLLAPSE_SOURCE_AT if ext in {e.lower() for e in SOURCE_EXT} else COLLAPSE_AT):
+            unread = sum(1 for r in members if r.get("note"))
+            size = sum(int(r.get("size") or 0) for r in members)
+            tail = f", {unread} not read" if unread else ""
+            out.append(f"  {folder + '/' if folder else ''}*{ext or ''}  ({len(members)} files, {size} bytes{tail})")
+        else:
+            for r in members:
+                note = f"  [{r['note']}]" if r.get("note") else ""
+                out.append(f"  {r['path']}  ({r['size']} bytes){note}")
+    if len(rows) > 5000:
+        out.append(f"  ... {len(rows) - 5000} more files not grouped")
+    return out
+
+
 def render(source_label: str, meta_line: str, rows: list[dict], terms: list[str]) -> str:
-    lines = [f"Source: {source_label}", meta_line, ""]
-    lines.append(f"Files ({len(rows)}):")
-    for r in rows[:MAX_FILES_LISTED]:
-        note = f"  [{r['note']}]" if r.get("note") else ""
-        lines.append(f"  {r['path']}  ({r['size']} bytes){note}")
-    if len(rows) > MAX_FILES_LISTED:
-        lines.append(f"  ... {len(rows) - MAX_FILES_LISTED} more files not listed")
+    cap = MAX_DIGEST_CHARS
+    # The section budgets shrink with a smaller configured cap, leaving room
+    # for the head and the listing.
+    scale = min(1.0, max(0.1, (cap - 1500) / (README_BUDGET + DEFS_BUDGET + HITS_BUDGET)))
+    head = [f"Source: {source_label[:200]}", meta_line[:260]]
+    sections: list[list[str]] = []
     readme = next((r for r in rows if os.path.basename(r["path"]).lower().startswith("readme") and r.get("text")), None)
     if readme:
-        lines += ["", f"README head ({readme['path']}, first {README_LINES} lines):"]
-        lines += ["  " + l[:200] for l in readme["text"].splitlines()[:README_LINES]]
+        body = ["  " + l[:200] for l in readme["text"].splitlines()[:README_LINES]]
+        sections.append([f"README head ({readme['path'][:160]}, first {README_LINES} lines):"]
+                        + _fit(body, int(README_BUDGET * scale), "README"))
     defs = definitions(rows)
     if defs:
-        lines += ["", "Definitions per source file:"]
-        for path, names in defs[:MAX_SOURCE_FILES_READ]:
-            lines.append(f"  {path}: {', '.join(names)}")
+        body = [f"  {path[:200]}: {', '.join(names)[:400]}" for path, names in defs[:MAX_SOURCE_FILES_READ]]
+        if len(defs) > MAX_SOURCE_FILES_READ:
+            body.append(f"  ... {len(defs) - MAX_SOURCE_FILES_READ} more source files with definitions not shown")
+        sections.append(["Definitions per source file:"] + _fit(body, int(DEFS_BUDGET * scale), "definition"))
     hits = term_hits(rows, terms)
-    lines += ["", f"Paper constructs searched in the code: {', '.join(terms) or '(none found in the text)'}"]
+    body = []
     for term in terms:
         if term in hits:
-            lines.append(f"  {term}:")
-            lines += ["    " + h for h in hits[term]]
+            body.append(f"  {term}:")
+            body += ["    " + h for h in hits[term]]
         else:
-            lines.append(f"  {term}: not found in any source file")
-    text = "\n".join(lines)
-    if len(text) > MAX_DIGEST_CHARS:
-        text = text[:MAX_DIGEST_CHARS] + "\n[digest truncated at the size cap]"
+            body.append(f"  {term}: not found in any source file")
+    sections.append([f"Paper constructs searched in the code: {', '.join(terms)[:300] or '(none found in the text)'}"]
+                    + _fit(body, int(HITS_BUDGET * scale), "construct-hit"))
+    text = "\n".join(head)
+    for sec in sections:
+        text += "\n\n" + "\n".join(sec)
+    # The listing goes last and takes what is left, never more than its own
+    # budget: every file by name when that fits, else grouped by folder.
+    title = f"Files ({len(rows)}, grouped by folder and type):"
+    room = min(LISTING_BUDGET, cap - len(text) - len(title) - 4)
+    plain = listing_lines(rows, collapse=False)
+    if sum(len(l) + 1 for l in plain) <= room:
+        title, listing = f"Files ({len(rows)}):", plain
+    else:
+        listing = listing_lines(rows)
+    text += "\n\n" + "\n".join([title] + _fit(listing, max(0, room), "listing"))
+    if len(text) > cap:
+        # Only reachable with a very small configured cap: cut at a line end.
+        cut = text.rfind("\n", 0, cap - 40)
+        text = text[:max(cut, 0)] + "\n[digest cut at the size cap]"
     return text
 
 
